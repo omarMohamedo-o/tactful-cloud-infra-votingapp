@@ -1,0 +1,21 @@
+---
+# PodMonitor for all voting-app pods
+# Since the apps don't expose /metrics, we'll use Kubernetes native metrics
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: voting-app-pods
+  namespace: voting-app
+  labels:
+    app: voting-app
+    release: prometheus
+spec:
+  selector:
+    matchLabels: {}
+  namespaceSelector:
+    matchNames:
+      - voting-app
+  podMetricsEndpoints:
+    - interval: 30s
+      path: /metrics
+      port: metrics

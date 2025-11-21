@@ -1,0 +1,9 @@
+kube_context      = "voting-app-dev"
+namespace         = "voting-app"
+postgres_user     = "postgres"
+postgres_password = "postgres"
+postgres_db       = "postgres"
+redis_password    = "redis123"
+vote_replicas     = 2
+result_replicas   = 2
+worker_replicas   = 1

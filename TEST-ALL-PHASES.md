@@ -258,13 +258,14 @@ terraform plan
 terraform apply -auto-approve
 
 # Expected output:
-# - Minikube profile created
-# - Cluster started
-# - Addons enabled (ingress, metrics-server, dashboard)
-# - Namespaces created
+# - Minikube profile created: voting-app-dev
+# - Cluster started with Kubernetes v1.28.3
+# - Addons enabled (ingress, metrics-server)
+# - Namespace created: voting-app
+# - /etc/hosts configured with vote.local and result.local
 
-# Verify cluster is running
-minikube status -p tactful-voting
+# Verify cluster is running (use the correct profile name from terraform output)
+minikube status -p voting-app-dev
 
 # Should show:
 # ✅ host: Running
@@ -278,30 +279,31 @@ minikube status -p tactful-voting
 ### Step 3: Configure kubectl Context
 
 ```bash
-# Set kubectl context
-kubectl config use-context tactful-voting
+# Set kubectl context (Terraform already set this automatically)
+kubectl config use-context voting-app-dev
 
 # Verify connection
 kubectl cluster-info
 kubectl get nodes
 
-# Expected: 1 node in Ready state
+# Expected: 1 node (voting-app-dev) in Ready state
 ```
 
 **✅ Checkpoint 2:** kubectl connected to Minikube cluster
 
-### Step 4: Update /etc/hosts for Ingress
+### Step 4: Verify /etc/hosts Configuration
 
 ```bash
-# Get Minikube IP
-MINIKUBE_IP=$(minikube ip -p tactful-voting)
+# Get Minikube IP (Terraform already configured /etc/hosts)
+MINIKUBE_IP=$(minikube ip -p voting-app-dev)
 echo "Minikube IP: $MINIKUBE_IP"
 
-# Add entries to /etc/hosts
-echo "$MINIKUBE_IP vote.local result.local" | sudo tee -a /etc/hosts
-
-# Verify entries
+# Verify entries were added by Terraform
 grep "vote.local\|result.local" /etc/hosts
+
+# Expected output:
+# 192.168.49.2 vote.local
+# 192.168.49.2 result.local
 
 # Test DNS resolution
 ping -c 1 vote.local
@@ -310,14 +312,28 @@ ping -c 1 result.local
 
 **✅ Checkpoint 3:** DNS resolution working for ingress hosts
 
-### Step 5: Deploy with Helm (Automated Script)
+### Step 5: Deploy with Helm
 
 ```bash
-# Navigate to k8s directory
-cd /home/omar/Projects/tactful-votingapp-cloud-infra/k8s
+# Follow the next steps from Terraform output:
+# 1. Add Helm repository
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
 
-# Run automated deployment script
-./deploy-helm.sh dev
+# 2. Deploy PostgreSQL
+helm install postgresql bitnami/postgresql \
+  -n voting-app \
+  -f ../k8s/helm/postgresql-values-dev.yaml
+
+# 3. Deploy Redis
+helm install redis bitnami/redis \
+  -n voting-app \
+  -f ../k8s/helm/redis-values-dev.yaml
+
+# 4. Deploy voting application
+helm install voting-app ../k8s/helm/voting-app \
+  -n voting-app \
+  --set environment=dev
 
 # Expected output:
 # ✅ Helm repositories added
@@ -493,11 +509,13 @@ Run all Phase 2 tests in sequence:
 # Complete Phase 2 test sequence
 cd /home/omar/Projects/tactful-votingapp-cloud-infra/terraform && \
 terraform apply -auto-approve && \
-kubectl config use-context tactful-voting && \
-MINIKUBE_IP=$(minikube ip -p tactful-voting) && \
-echo "$MINIKUBE_IP vote.local result.local" | sudo tee -a /etc/hosts && \
-cd ../k8s && \
-./deploy-helm.sh dev && \
+kubectl config use-context voting-app-dev && \
+echo "✅ Terraform applied, cluster created" && \
+helm repo add bitnami https://charts.bitnami.com/bitnami && \
+helm repo update && \
+helm install postgresql bitnami/postgresql -n voting-app -f ../k8s/helm/postgresql-values-dev.yaml && \
+helm install redis bitnami/redis -n voting-app -f ../k8s/helm/redis-values-dev.yaml && \
+helm install voting-app ../k8s/helm/voting-app -n voting-app --set environment=dev && \
 echo "⏳ Waiting 60 seconds for pods to be ready..." && \
 sleep 60 && \
 kubectl get pods -n voting-app && \
@@ -815,12 +833,12 @@ docker compose up --build -d
 
 ```bash
 # Reset Minikube
-minikube delete -p tactful-voting
+minikube delete -p voting-app-dev
 cd terraform && terraform apply -auto-approve
 
 # Reset deployments
 helm uninstall postgresql redis voting-app -n voting-app
-cd k8s && ./deploy-helm.sh dev
+# Then follow Terraform output to redeploy with Helm
 ```
 
 ### CI/CD Issues

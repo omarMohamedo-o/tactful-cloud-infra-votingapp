@@ -8,9 +8,21 @@ metadata:
     app: seed
 spec:
   restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: seed
       image: curlimages/curl:latest
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        readOnlyRootFilesystem: true
       command: ["/bin/sh"]
       args:
         - -c

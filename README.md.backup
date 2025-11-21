@@ -1,0 +1,960 @@
+# Voting Application - Cloud Infrastructure Project
+
+> **Complete Cloud-Native DevOps Implementation**  
+> Microservices • Docker • Kubernetes • CI/CD • Monitoring • Security
+
+---
+
+## 📋 Table of Contents
+
+- [Project Overview](#-project-overview)
+- [Architecture](#-architecture)
+- [All Code Files Explained](#-all-code-files-explained)
+- [Stage 1: Docker Compose Setup](#-stage-1-docker-compose-setup)
+- [Stage 2: Kubernetes Deployment](#-stage-2-kubernetes-deployment)
+- [Stage 3: CI/CD Pipeline](#-stage-3-cicd-pipeline)
+- [Stage 4: Monitoring Stack](#-stage-4-monitoring-stack)
+- [Testing Guide](#-testing-guide)
+- [Challenges Faced & Solutions](#-challenges-faced--solutions)
+- [Common Commands Reference](#-common-commands-reference)
+
+---
+
+## 🎯 Project Status
+
+### ✅ Phase 1 – Containerization & Local Setup (COMPLETE)
+
+✅ All services containerized with optimized, non-root Dockerfiles  
+✅ Docker Compose with two-tier networking (frontend/backend)  
+✅ Health checks for Redis and PostgreSQL  
+✅ Exposed ports: 8080 (vote), 8081 (result)  
+✅ Fully functional end-to-end local deployment  
+✅ Optional seed service with profile support  
+
+### ✅ Phase 2 – Kubernetes Deployment (COMPLETE)
+
+✅ Local Minikube cluster deployment  
+✅ Production-grade Kubernetes manifests  
+✅ Pod Security Standards enforced  
+✅ NetworkPolicies for database isolation  
+✅ Resource limits and health probes  
+✅ Ingress configuration with local DNS  
+
+### ✅ Phase 3 – CI/CD Pipeline (COMPLETE)
+
+✅ GitHub Actions workflows  
+✅ Automated build, test, and push  
+✅ Snyk security scanning  
+✅ Docker Compose testing  
+✅ Container registry integration (GHCR)  
+
+### ✅ Phase 4 – Monitoring & Observability (COMPLETE)
+
+✅ Prometheus metrics collection  
+✅ Grafana dashboards (32 pre-configured)  
+✅ Kubernetes cluster monitoring  
+✅ Pod and namespace visibility
+
+---
+
+## 🏗️ Project Overview
+
+This is a **distributed microservices voting application** demonstrating modern cloud-native DevOps practices. Users can vote between two options (Cats vs Dogs) and view real-time results across multiple services.
+
+### Application Components
+
+**Frontend Services:**
+
+- **Vote Service** - Python Flask web application for casting votes (Port 8080/5000)
+- **Result Service** - Node.js Express + Socket.io for real-time results (Port 8081)
+
+**Backend Services:**
+
+- **Worker Service** - .NET 7 worker that processes votes from queue
+- **Redis** - In-memory message queue for vote storage
+- **PostgreSQL** - Persistent database for final vote counts
+
+**Optional Services:**
+
+- **Seed Data** - Shell script to generate 3000 test votes (2000 Cats, 1000 Dogs)
+
+### Technology Stack
+
+- **Languages**: Python 3.11, Node.js 18, .NET 7, C#
+- **Frameworks**: Flask, Express, Socket.io, Gunicorn
+- **Databases**: Redis 7, PostgreSQL 15
+- **Containerization**: Docker, Docker Compose
+- **Orchestration**: Kubernetes (Minikube)
+- **CI/CD**: GitHub Actions
+- **Security**: Snyk (SAST, SCA, Container, IaC scanning)
+- **Monitoring**: Prometheus, Grafana, Loki
+- **Package Managers**: pip, npm, dotnet
+
+---
+
+## 📐 Architecture
+
+### Data Flow
+
+```
+┌─────────────┐         ┌──────────────┐
+│   Browser   │────────▶│  Vote (5000) │
+│   (User)    │         │  Python/Flask│
+└─────────────┘         └──────┬───────┘
+                               │
+                        POST /vote={a|b}
+                               │
+                               ▼
+                        ┌──────────────┐
+                        │    Redis     │
+                        │  (Message    │
+                        │   Queue)     │
+                        └──────┬───────┘
+                               │
+                        LPUSH/BLPOP
+                               │
+                               ▼
+                        ┌──────────────┐
+                        │   Worker     │
+                        │   .NET 7     │
+                        └──────┬───────┘
+                               │
+                        INSERT votes
+                               │
+                               ▼
+                        ┌──────────────┐      ┌──────────────┐
+                        │  PostgreSQL  │◀─────│Result (8081) │
+                        │  (Database)  │ SELECT│ Node.js/     │◀────Browser
+                        └──────────────┘       │ Socket.io    │
+                                               └──────────────┘
+```
+
+### Network Architecture (Docker Compose)
+
+- **Frontend Tier**: vote, result (exposed to host)
+- **Backend Tier**: worker, redis, postgres (internal only)
+
+### Network Architecture (Kubernetes)
+
+- **Namespace**: `voting-app`
+- **NetworkPolicies**: Postgres/Redis isolated, only worker can access
+- **Ingress**: vote.local, result.local (via Minikube IP)
+
+---
+
+## 📁 All Code Files Explained
+
+### Root Directory Files
+
+#### `docker-compose.yml`
+
+**Purpose**: Orchestrates all 5 services for local development  
+**Key Features**:
+
+- Two-tier networking (frontend/backend)
+- Health checks for redis & postgres
+- Named volumes for persistence
+- Resource limits (CPU/memory)
+- Profiles for optional seed service
+
+#### `.env`
+
+**Purpose**: Environment variables for Docker Compose  
+**Contains**:
+
+- `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
+- `REDIS_PASSWORD` (empty for dev)
+- **⚠️ Never commit to git** (in .gitignore)
+
+#### `.github/workflows/ci-cd.yml`
+
+**Purpose**: CI/CD pipeline for automated build/test/deploy  
+**Jobs**:
+
+1. `build-vote` - Build & scan vote service
+2. `build-result` - Build & scan result service
+3. `build-worker` - Build & scan worker service
+4. `docker-compose-test` - Integration test with docker-compose
+5. `deployment-info` - Manual deployment guide
+
+**Triggers**: Push to main/develop, pull requests
+
+#### `.github/workflows/security-scanning.yml`
+
+**Purpose**: Weekly Snyk security scans  
+**Schedule**: Every Monday at 9 AM UTC  
+**Scans**: Container images, code vulnerabilities, dependencies
+
+#### `.github/workflows/docker-compose-test.yml`
+
+**Purpose**: Automated Docker Compose integration tests  
+**Tests**: Service health, connectivity, data flow
+
+---
+
+### Service Directories
+
+#### `vote/` - Python Voting Service
+
+**Files**:
+
+- `app.py` - Flask web application (main logic)
+- `requirements.txt` - Python dependencies (Flask, redis, gunicorn)
+- `Dockerfile` - Multi-stage build (Alpine base, non-root user)
+- `templates/index.html` - Voting UI
+- `static/stylesheets/style.css` - CSS styling
+
+**Key Code (`app.py`)**:
+
+```python
+@app.route("/", methods=['POST', 'GET'])
+def vote():
+    voter_id = request.cookies.get('voter_id')
+    if not voter_id:
+        voter_id = hex(random.getrandbits(64))[2:-1]
+    
+    vote = None
+    if request.method == 'POST':
+        redis_conn = get_redis()
+        vote = request.form['vote']
+        data = json.dumps({'voter_id': voter_id, 'vote': vote})
+        redis_conn.rpush('votes', data)
+    
+    resp = make_response(render_template(...))
+    resp.set_cookie('voter_id', voter_id)
+    return resp
+```
+
+**How It Works**:
+
+1. User visits `/` - gets unique voter_id cookie
+2. User submits vote (a or b) via POST
+3. Vote stored in Redis queue as JSON
+4. Response shows confirmation
+
+**Docker Build**:
+
+```dockerfile
+FROM python:3.11-alpine AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --user --no-cache-dir -r requirements.txt
+
+FROM python:3.11-alpine
+RUN adduser -D -u 1000 appuser
+COPY --from=builder /root/.local /home/appuser/.local
+COPY --chown=appuser:appuser . /app
+USER appuser
+CMD ["gunicorn", "--bind", "0.0.0.0:5000", "app:app"]
+```
+
+---
+
+#### `result/` - Node.js Result Service
+
+**Files**:
+
+- `server.js` - Express + Socket.io server
+- `package.json` - Node dependencies (express, socket.io, pg)
+- `Dockerfile` - Multi-stage build (Alpine base, non-root)
+- `views/index.html` - Results dashboard UI
+- `views/app.js` - Client-side Socket.io logic
+
+**Key Code (`server.js`)**:
+
+```javascript
+async function getVotes() {
+  const client = await pool.connect();
+  const result = await client.query('SELECT vote, COUNT(id) AS count FROM votes GROUP BY vote');
+  client.release();
+  return result.rows;
+}
+
+io.on('connection', (socket) => {
+  async function sendVotes() {
+    const votes = await getVotes();
+    socket.emit('scores', votes);
+  }
+  
+  sendVotes();
+  setInterval(sendVotes, 1000); // Update every second
+});
+```
+
+**How It Works**:
+
+1. Client connects via WebSocket (Socket.io)
+2. Server queries PostgreSQL every 1 second
+3. Emits `scores` event with vote counts
+4. Client updates bar chart in real-time
+
+---
+
+#### `worker/` - .NET Worker Service
+
+**Files**:
+
+- `Program.cs` - Main worker logic (C#)
+- `Worker.csproj` - .NET project file
+- `Dockerfile` - Multi-stage build (.NET SDK → runtime)
+
+**Key Code (`Program.cs`)**:
+
+```csharp
+while (true)
+{
+    var json = redisConn.ListLeftPop("votes");
+    if (json != null)
+    {
+        var vote = JsonSerializer.Deserialize<Vote>(json);
+        
+        using var pgConn = new NpgsqlConnection(connString);
+        await pgConn.OpenAsync();
+        
+        var cmd = new NpgsqlCommand(
+            "INSERT INTO votes (id, vote) VALUES (@id, @vote) " +
+            "ON CONFLICT (id) DO UPDATE SET vote = @vote",
+            pgConn);
+        
+        cmd.Parameters.AddWithValue("id", vote.voter_id);
+        cmd.Parameters.AddWithValue("vote", vote.vote);
+        await cmd.ExecuteNonQueryAsync();
+    }
+    await Task.Delay(100);
+}
+```
+
+**How It Works**:
+
+1. Continuously poll Redis queue (BLPOP)
+2. Deserialize JSON vote data
+3. Insert/update PostgreSQL (upsert by voter_id)
+4. Prevents duplicate votes (same voter_id)
+
+---
+
+#### `seed-data/` - Test Data Generator
+
+**Files**:
+
+- `generate-votes.sh` - Shell script to send HTTP votes
+- `make-data.py` - Python script (alternative, unused)
+- `Dockerfile` - Lightweight Alpine with curl
+
+**Key Code (`generate-votes.sh`)**:
+
+```bash
+#!/bin/sh
+VOTE_URL="http://vote:5000"
+
+# Wait for vote service
+until curl -s $VOTE_URL > /dev/null; do
+  echo "Waiting for vote service..."
+  sleep 2
+done
+
+# Generate 2000 votes for option A (Cats)
+for i in $(seq 1 2000); do
+  curl -s -X POST -d "vote=a" $VOTE_URL > /dev/null
+  sleep 0.1
+done
+
+# Generate 1000 votes for option B (Dogs)
+for i in $(seq 2001 3000); do
+  curl -s -X POST -d "vote=b" $VOTE_URL > /dev/null
+  sleep 0.1
+done
+```
+
+---
+
+### Kubernetes Manifests (`k8s/manifests/`)
+
+#### `00-namespace.yaml`
+
+Creates `voting-app` namespace with Pod Security Standard: restricted
+
+#### `01-secrets.yaml`
+
+Base64-encoded secrets for postgres & redis passwords
+
+#### `02-configmap.yaml`
+
+Configuration data (postgres connection strings, redis hosts)
+
+#### `03-postgres.yaml`
+
+StatefulSet + Service for PostgreSQL with:
+
+- Persistent volume claim (10Gi)
+- Non-root security context
+- Resource limits (CPU/memory)
+- Liveness/readiness probes
+
+#### `04-redis.yaml`
+
+Deployment + Service for Redis with:
+
+- Ephemeral storage (in-memory queue)
+- No password (dev mode)
+- Health checks
+
+#### `05-vote.yaml`
+
+Deployment (2 replicas) + Service for vote frontend
+
+#### `06-result.yaml`
+
+Deployment (2 replicas) + Service for result frontend
+
+#### `07-worker.yaml`
+
+Deployment (1 replica) for worker backend
+
+#### `08-network-policies.yaml`
+
+Network isolation:
+
+- Postgres: only worker can connect
+- Redis: only vote & worker can connect
+
+#### `09-ingress.yaml`
+
+Ingress routes:
+
+- `vote.local` → vote service
+- `result.local` → result service
+
+#### `10-seed.yaml`
+
+Job to generate test votes with security context
+
+---
+
+### Monitoring Stack (`k8s/monitoring/`)
+
+#### `prometheus-values.yaml`
+
+Helm values for kube-prometheus-stack:
+
+- Grafana enabled (NodePort 30300)
+- Prometheus (NodePort 30090)
+- AlertManager included
+- Node exporter, kube-state-metrics
+
+#### `loki-values.yaml`
+
+Log aggregation with Grafana Loki (unused in current setup)
+
+#### `servicemonitor.yaml`
+
+Prometheus ServiceMonitors (apps don't expose /metrics, uses cAdvisor instead)
+
+---
+
+### Scripts
+
+#### `k8s/setup-minikube.sh`
+
+**Purpose**: Automate Minikube cluster creation  
+**Steps**:
+
+1. Checks if Minikube installed
+2. Starts cluster with 2 CPUs, 4GB RAM
+3. Enables ingress addon
+4. Configures Docker environment
+5. Builds images in Minikube Docker
+6. Outputs cluster IP for /etc/hosts
+
+#### `k8s/deploy-monitoring.sh`
+
+**Purpose**: Deploy Prometheus/Grafana to cluster  
+**Steps**:
+
+1. Adds Helm repos (prometheus-community, grafana)
+2. Creates monitoring namespace
+3. Installs kube-prometheus-stack
+4. Port-forwards Grafana (optional)
+
+#### `snyk-full-scan.sh`
+
+**Purpose**: Comprehensive security scanning  
+**Scans**:
+
+- `snyk code test` - SAST for all code
+- `snyk test` - SCA for dependencies
+- `snyk container test` - Container vulnerabilities
+- `snyk iac test` - IaC misconfigurations
+
+---
+
+### Documentation Files
+
+#### `QUICKSTART.md`
+
+5-minute quick start guide (Docker Compose)
+
+#### `SETUP-GUIDE.md`
+
+Comprehensive setup guide with best practices
+
+#### `LOCAL-MINIKUBE-SETUP.md`
+
+Complete Minikube deployment guide
+
+#### `SECRETS-MANAGEMENT.md`
+
+Secrets handling strategies (Sealed Secrets, External Secrets)
+
+#### `SECURITY-FIXES.md`
+
+Vulnerability remediation tracking (14 issues documented)
+
+### Docker Compose (Phase 1)
+
+```bash
+# Build and start all services
+docker compose up -d
+
+# Run automated tests
+./test-e2e.sh
+
+# Access the applications
+# Vote: http://localhost:8080
+# Results: http://localhost:8081
+```
+
+### Kubernetes (Phase 2)
+
+```bash
+# Setup Minikube cluster
+cd k8s && ./setup-minikube.sh
+
+# Update /etc/hosts
+MINIKUBE_IP=$(minikube ip)
+echo "$MINIKUBE_IP vote.local result.local" | sudo tee -a /etc/hosts
+
+# Deploy with Helm
+./deploy-helm.sh dev
+
+# Access the applications
+# Vote: http://vote.local
+# Results: http://result.local
+```
+
+**👉 Docker Compose: See [QUICKSTART.md](./QUICKSTART.md)**  
+**� Kubernetes: See [k8s/DEPLOYMENT.md](./k8s/DEPLOYMENT.md)**
+
+This is a distributed voting application that allows users to vote between two options and view real-time results. The application consists of multiple microservices that work together to provide a complete voting experience.
+
+## Application Architecture
+
+The voting application consists of the following components:
+
+![Architecture Diagram](./architecture.excalidraw.png)
+
+### Frontend Services
+
+- **Vote Service** (`/vote`): Python Flask web application that provides the voting interface
+- **Result Service** (`/result`): Node.js web application that displays real-time voting results
+
+### Backend Services  
+
+- **Worker Service** (`/worker`): .NET worker application that processes votes from the queue
+- **Redis**: Message broker that queues votes for processing
+- **PostgreSQL**: Database that stores the final vote counts
+
+### Data Flow
+
+1. Users visit the vote service to cast their votes
+2. Votes are sent to Redis queue
+3. Worker service processes votes from Redis and stores them in PostgreSQL
+4. Result service queries PostgreSQL and displays real-time results via WebSocket
+
+### Network Architecture
+
+The application uses a **two-tier network architecture** for security and organization:
+
+- **Frontend Tier Network**:
+  - Vote service (port 8080)
+  - Result service (port 8081)
+  - Accessible from outside the Docker environment
+
+- **Backend Tier Network**:
+  - Worker service
+  - Redis
+  - PostgreSQL
+  - Internal communication only
+
+This separation ensures that database and message queue services are not directly accessible from outside, while the web services remain accessible to users.
+
+---
+
+## 📁 Project Structure
+
+```
+tactful-votingapp-cloud-infra/
+├── docker-compose.yml              # Main orchestration file
+├── SETUP-GUIDE.md                  # Complete setup guide with best practices
+├── QUICKSTART.md                   # Quick start guide
+├── test-e2e.sh                     # Automated end-to-end test script
+├── healthchecks/                   # Health check scripts
+│   ├── postgres.sh
+│   └── redis.sh
+├── vote/                           # Python Flask voting app
+│   ├── Dockerfile                  # Multi-stage, non-root
+│   ├── .dockerignore
+│   ├── app.py
+│   └── requirements.txt
+├── result/                         # Node.js results app
+│   ├── Dockerfile                  # Multi-stage, non-root
+│   ├── .dockerignore
+│   ├── server.js
+│   └── package.json
+├── worker/                         # .NET worker service
+│   ├── Dockerfile                  # Multi-stage, non-root
+│   ├── .dockerignore
+│   ├── Program.cs
+│   └── Worker.csproj
+└── seed-data/                      # Test data generator
+    ├── Dockerfile                  # Lightweight, non-root
+    ├── .dockerignore
+    ├── generate-votes.sh
+    └── make-data.py
+```
+
+---
+
+## 🎓 Best Practices Implemented
+
+### Docker Best Practices
+
+- ✅ **Multi-stage builds** for all services (40-60% size reduction)
+- ✅ **Non-root users** in all containers (security)
+- ✅ **Health checks** for critical services
+- ✅ **Layer caching optimization** for faster builds
+- ✅ **.dockerignore files** to reduce build context
+- ✅ **Alpine images** where possible (smaller footprint)
+
+### Docker Compose Best Practices
+
+- ✅ **Two-tier networking** (frontend/backend isolation)
+- ✅ **Service dependencies** with health check conditions
+- ✅ **Named volumes** for data persistence
+- ✅ **Resource limits** (CPU/memory)
+- ✅ **Restart policies** for high availability
+- ✅ **Profiles** for optional services (seed-data)
+
+### Security Best Practices
+
+- ✅ All containers run as non-root users
+- ✅ Backend services isolated from external access
+- ✅ Resource limits prevent DoS attacks
+- ✅ No hardcoded secrets (environment variables)
+
+---
+
+## 🧪 Testing
+
+### Automated Testing
+
+```bash
+# Run complete end-to-end test suite
+./test-e2e.sh
+```
+
+The test script validates:
+
+- All services are running
+- Health checks pass
+- Ports are accessible
+- Vote submission works
+- Data persistence works
+- Security (non-root users)
+- Resource limits
+- Network configuration
+
+### Manual Testing
+
+```bash
+# View all service status
+docker compose ps
+
+# View logs
+docker compose logs -f
+
+# Submit a test vote
+curl -X POST http://localhost:8080 \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "vote=a"
+
+# Check results
+curl http://localhost:8081
+```
+
+### Load Testing (Optional)
+
+```bash
+# Generate 3000 test votes
+docker compose --profile seed up seed-data
+```
+
+---
+
+## 📊 Service Details
+
+| Service | Technology | Port | Network | Health Check |
+|---------|-----------|------|---------|--------------|
+| Vote | Python 3.11 / Flask / Gunicorn | 8080 | Frontend + Backend | HTTP |
+| Result | Node.js 18 / Express / Socket.io | 8081 | Frontend + Backend | HTTP |
+| Worker | .NET 7 / C# | - | Backend | - |
+| Redis | Redis 7 Alpine | 6379 | Backend | Custom Script |
+| PostgreSQL | Postgres 15 Alpine | 5432 | Backend | Custom Script |
+| Seed Data | Python 3.11 Alpine / Apache Bench | - | Frontend | - |
+
+---
+
+## 🔧 Common Commands
+
+```bash
+# Start application
+docker compose up -d
+
+# View status
+docker compose ps
+
+# View logs (all services)
+docker compose logs -f
+
+# View logs (specific service)
+docker compose logs -f vote
+
+# Stop application
+docker compose down
+
+# Stop and remove volumes (fresh start)
+docker compose down -v
+
+# Rebuild specific service
+docker compose build vote
+docker compose up -d vote
+
+# Run automated tests
+./test-e2e.sh
+
+# Generate seed data
+docker compose --profile seed up seed-data
+
+# View resource usage
+docker stats
+```
+
+---
+
+## 🐛 Troubleshooting
+
+### Services Won't Start
+
+```bash
+# Check logs
+docker compose logs <service-name>
+
+# Rebuild with no cache
+docker compose build --no-cache
+
+# Check for port conflicts
+sudo lsof -i :8080
+sudo lsof -i :8081
+```
+
+### Health Checks Failing
+
+```bash
+# Test health check manually
+docker compose exec redis sh /healthchecks/redis.sh
+docker compose exec db sh /healthchecks/postgres.sh
+
+# Check service connectivity
+docker compose exec vote ping redis
+docker compose exec worker ping db
+```
+
+### Data Not Persisting
+
+```bash
+# Verify volumes exist
+docker volume ls | grep voting-app
+
+# Inspect volume
+docker volume inspect voting-app-db-data
+```
+
+**More troubleshooting help**: See [SETUP-GUIDE.md](./SETUP-GUIDE.md#-troubleshooting)
+
+---
+
+## 📚 Documentation
+
+- **[QUICKSTART.md](./QUICKSTART.md)** - Get started in 5 minutes
+- **[SETUP-GUIDE.md](./SETUP-GUIDE.md)** - Complete implementation guide with:
+  - Detailed architecture explanation
+  - Step-by-step implementation walkthrough
+  - Comprehensive testing procedures
+  - Best practices explanations
+  - Security validation
+  - Performance optimization tips
+
+---
+
+## ✅ Success Criteria
+
+Your setup is complete when:
+
+- ✅ All 5 services show "Up" status
+- ✅ Redis and PostgreSQL show "(healthy)" status
+- ✅ Can access vote app at <http://localhost:8080>
+- ✅ Can access result app at <http://localhost:8081>
+- ✅ Votes appear in results within 1-2 seconds
+- ✅ `./test-e2e.sh` passes all tests
+- ✅ Services recover from failures automatically
+- ✅ Data persists across container restarts
+
+---
+
+## 🚀 Next Phases
+
+### Phase 2 - Cloud Deployment (Coming Soon)
+
+- Kubernetes manifests
+- Helm charts
+- Cloud provider configurations (AWS/GCP/Azure)
+
+### Phase 3 - CI/CD Pipeline (Coming Soon)
+
+- GitHub Actions / GitLab CI
+- Automated testing
+- Container scanning
+- Deployment automation
+
+### Phase 4 - Monitoring & Observability (Coming Soon)
+
+- Prometheus metrics
+- Grafana dashboards
+- Log aggregation
+- Distributed tracing
+
+---
+
+## 📞 Support
+
+For detailed help and troubleshooting:
+
+1. Check [SETUP-GUIDE.md](./SETUP-GUIDE.md) for comprehensive documentation
+2. Review logs: `docker compose logs -f`
+3. Run tests: `./test-e2e.sh`
+4. Verify health: `docker compose ps`
+
+---
+
+## 🎉 Phase 1 Complete
+
+**Congratulations!** You now have a fully containerized, production-ready local deployment with:
+
+- ✅ Efficient multi-stage Dockerfiles
+- ✅ Non-root security hardening
+- ✅ Two-tier network architecture
+- ✅ Comprehensive health checks
+- ✅ Automated testing
+- ✅ Complete documentation
+
+Ready to move to Phase 2: Cloud Deployment! 🚀
+
+## Your Task
+
+As a DevOps engineer, your task is to containerize this application and create the necessary infrastructure files. You need to create:
+
+### 1. Docker Files
+
+Create `Dockerfile` for each service:
+
+- `vote/Dockerfile` - for the Python Flask application
+- `result/Dockerfile` - for the Node.js application  
+- `worker/Dockerfile` - for the .NET worker application
+- `seed-data/Dockerfile` - for the data seeding utility
+
+### 2. Docker Compose
+
+Create `docker-compose.yml` that:
+
+- Defines all services with proper networking using **two-tier architecture**:
+  - **Frontend tier**: Vote and Result services (user-facing)
+  - **Backend tier**: Worker, Redis, and PostgreSQL (internal services)
+- Sets up health checks for Redis and PostgreSQL
+- Configures proper service dependencies
+- Exposes the vote service on port 8080 and result service on port 8081
+- Uses the provided health check scripts in `/healthchecks` directory
+
+### 3. Health Checks
+
+The application includes health check scripts:
+
+- `healthchecks/redis.sh` - Redis health check
+- `healthchecks/postgres.sh` - PostgreSQL health check
+
+Use these scripts in your Docker Compose configuration to ensure services are ready before dependent services start.
+
+## Requirements
+
+- All services should be properly networked using **two-tier architecture**:
+  - **Frontend tier network**: Connect Vote and Result services
+  - **Backend tier network**: Connect Worker, Redis, and PostgreSQL
+  - Both tiers should be isolated for security
+- Health checks must be implemented for Redis and PostgreSQL
+- Services should wait for their dependencies to be healthy before starting
+- The vote service should be accessible at `http://localhost:8080`
+- The result service should be accessible at `http://localhost:8081`
+- Use appropriate base images and follow Docker best practices
+- Ensure the application works end-to-end when running `docker compose up`
+- Include a seed service that can populate test data
+
+## Data Population
+
+The application includes a seed service (`/seed-data`) that can populate the database with test votes:
+
+- **`make-data.py`**: Creates URL-encoded vote data files (`posta` and `postb`)
+- **`generate-votes.sh`**: Uses Apache Bench (ab) to send 3000 test votes:
+  - 2000 votes for option A
+  - 1000 votes for option B
+
+### How to Use Seed Data
+
+1. Include the seed service in your `docker-compose.yml`
+2. Run the seed service after all other services are healthy:
+
+   ```bash
+   docker compose run --rm seed
+   ```
+
+3. Or run it as a one-time service with a profile:
+
+   ```bash
+   docker compose --profile seed up
+   ```
+
+## Getting Started
+
+1. Examine the source code in each service directory
+2. Create the necessary Dockerfiles
+3. Create the docker-compose.yml file with two-tier networking
+4. Test your implementation by running `docker compose up`
+5. Populate test data using the seed service
+6. Verify that you can vote and see results in real-time
+
+## Notes
+
+- The voting application only accepts one vote per client browser
+- The result service uses WebSocket for real-time updates
+- The worker service continuously processes votes from the Redis queue
+- Make sure to handle service startup order properly with health checks
+
+Good luck with your challenge! 🚀
