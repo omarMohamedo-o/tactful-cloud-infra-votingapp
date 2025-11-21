@@ -1,6 +1,6 @@
 # Multi-stage build for Python Vote service
 # Stage 1: Build stage
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Set working directory
 WORKDIR /app
@@ -14,7 +14,7 @@ RUN python -m venv /opt/venv && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Stage 2: Runtime stage
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 # Install curl for healthcheck
 RUN apt-get update && \
