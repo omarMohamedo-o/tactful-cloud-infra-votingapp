@@ -1,0 +1,260 @@
+{
+    "dashboard": {
+        "title": "Voting App Overview",
+        "tags": [
+            "voting-app",
+            "microservices"
+        ],
+        "timezone": "browser",
+        "schemaVersion": 16,
+        "refresh": "10s",
+        "panels": [
+            {
+                "title": "Voting App Architecture",
+                "type": "text",
+                "gridPos": {
+                    "h": 4,
+                    "w": 24,
+                    "x": 0,
+                    "y": 0
+                },
+                "mode": "markdown",
+                "content": "# Voting Application Monitoring\n\n**Services:** Vote (Python Flask) → Redis → Worker (.NET) → PostgreSQL → Result (Node.js)\n\n**Current Status:** All pods running | Metrics collected every 30s"
+            },
+            {
+                "title": "Vote Service - HTTP Requests",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 4
+                },
+                "targets": [
+                    {
+                        "expr": "rate(http_requests_total{job=\"vote-service\"}[5m])",
+                        "legendFormat": "{{method}} {{path}}"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "reqps",
+                        "label": "Requests/sec"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "Result Service - HTTP Requests",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 4
+                },
+                "targets": [
+                    {
+                        "expr": "rate(http_requests_total{job=\"result-service\"}[5m])",
+                        "legendFormat": "{{method}} {{path}}"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "reqps",
+                        "label": "Requests/sec"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "Redis Memory Usage",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 12
+                },
+                "targets": [
+                    {
+                        "expr": "redis_memory_used_bytes{job=\"redis-service\"}",
+                        "legendFormat": "Used Memory"
+                    },
+                    {
+                        "expr": "redis_memory_max_bytes{job=\"redis-service\"}",
+                        "legendFormat": "Max Memory"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "bytes",
+                        "label": "Memory"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "PostgreSQL Connections",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 12
+                },
+                "targets": [
+                    {
+                        "expr": "pg_stat_database_numbackends{job=\"postgres-service\",datname=\"postgres\"}",
+                        "legendFormat": "Active Connections"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "short",
+                        "label": "Connections"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "Pod CPU Usage",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 20
+                },
+                "targets": [
+                    {
+                        "expr": "rate(container_cpu_usage_seconds_total{namespace=\"voting-app\",container!=\"\",container!=\"POD\"}[5m])",
+                        "legendFormat": "{{pod}} - {{container}}"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "percentunit",
+                        "label": "CPU"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "Pod Memory Usage",
+                "type": "graph",
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 20
+                },
+                "targets": [
+                    {
+                        "expr": "container_memory_working_set_bytes{namespace=\"voting-app\",container!=\"\",container!=\"POD\"}",
+                        "legendFormat": "{{pod}} - {{container}}"
+                    }
+                ],
+                "yaxes": [
+                    {
+                        "format": "bytes",
+                        "label": "Memory"
+                    },
+                    {
+                        "format": "short"
+                    }
+                ]
+            },
+            {
+                "title": "Pods Status",
+                "type": "stat",
+                "gridPos": {
+                    "h": 4,
+                    "w": 6,
+                    "x": 0,
+                    "y": 28
+                },
+                "targets": [
+                    {
+                        "expr": "count(kube_pod_status_phase{namespace=\"voting-app\",phase=\"Running\"})",
+                        "legendFormat": "Running Pods"
+                    }
+                ],
+                "options": {
+                    "graphMode": "none",
+                    "colorMode": "value"
+                }
+            },
+            {
+                "title": "Vote Replicas",
+                "type": "stat",
+                "gridPos": {
+                    "h": 4,
+                    "w": 6,
+                    "x": 6,
+                    "y": 28
+                },
+                "targets": [
+                    {
+                        "expr": "kube_deployment_status_replicas_available{namespace=\"voting-app\",deployment=\"vote\"}",
+                        "legendFormat": "Vote Pods"
+                    }
+                ],
+                "options": {
+                    "graphMode": "none",
+                    "colorMode": "value"
+                }
+            },
+            {
+                "title": "Result Replicas",
+                "type": "stat",
+                "gridPos": {
+                    "h": 4,
+                    "w": 6,
+                    "x": 12,
+                    "y": 28
+                },
+                "targets": [
+                    {
+                        "expr": "kube_deployment_status_replicas_available{namespace=\"voting-app\",deployment=\"result\"}",
+                        "legendFormat": "Result Pods"
+                    }
+                ],
+                "options": {
+                    "graphMode": "none",
+                    "colorMode": "value"
+                }
+            },
+            {
+                "title": "Worker Replicas",
+                "type": "stat",
+                "gridPos": {
+                    "h": 4,
+                    "w": 6,
+                    "x": 18,
+                    "y": 28
+                },
+                "targets": [
+                    {
+                        "expr": "kube_deployment_status_replicas_available{namespace=\"voting-app\",deployment=\"worker\"}",
+                        "legendFormat": "Worker Pods"
+                    }
+                ],
+                "options": {
+                    "graphMode": "none",
+                    "colorMode": "value"
+                }
+            }
+        ]
+    }
+}

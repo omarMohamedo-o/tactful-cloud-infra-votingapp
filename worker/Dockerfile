@@ -1,6 +1,6 @@
 # Multi-stage build for .NET Worker service
 # Stage 1: Build stage
-FROM mcr.microsoft.com/dotnet/sdk:7.0 AS builder
+FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
 
 # Set working directory
 WORKDIR /source
@@ -14,7 +14,7 @@ COPY . .
 RUN dotnet publish -c Release -o /app --no-restore
 
 # Stage 2: Runtime stage
-FROM mcr.microsoft.com/dotnet/runtime:7.0-alpine
+FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine
 
 # Create non-root user
 RUN addgroup -S appuser && adduser -S appuser -G appuser

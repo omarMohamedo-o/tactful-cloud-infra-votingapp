@@ -19,10 +19,11 @@ namespace Worker
                 var postgresUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres";
                 var postgresPassword = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "postgres";
                 var postgresDb = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "postgres";
-                var connectionString = $"Server=db;Username={postgresUser};Password={postgresPassword};Database={postgresDb}";
-                
+                var postgresHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "db";
+                var connectionString = $"Server={postgresHost};Username={postgresUser};Password={postgresPassword};Database={postgresDb}";
+
                 var redisHost = Environment.GetEnvironmentVariable("REDIS_HOST") ?? "redis";
-                
+
                 var pgsql = OpenDbConnection(connectionString);
                 var redisConn = OpenRedisConnection(redisHost);
                 var redis = redisConn.GetDatabase();
@@ -39,7 +40,8 @@ namespace Worker
                     Thread.Sleep(100);
 
                     // Reconnect redis if down
-                    if (redisConn == null || !redisConn.IsConnected) {
+                    if (redisConn == null || !redisConn.IsConnected)
+                    {
                         Console.WriteLine("Reconnecting Redis");
                         redisConn = OpenRedisConnection(redisHost);
                         redis = redisConn.GetDatabase();
@@ -121,7 +123,7 @@ namespace Worker
                 EndPoints = { ipAddress },
                 AbortOnConnectFail = false
             };
-            
+
             if (!string.IsNullOrEmpty(redisPassword))
             {
                 configOptions.Password = redisPassword;

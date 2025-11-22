@@ -25,6 +25,11 @@ spec:
           image: tactful-votingapp-cloud-infra-worker:latest
           imagePullPolicy: IfNotPresent
           env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: app-config
+                  key: POSTGRES_HOST
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:

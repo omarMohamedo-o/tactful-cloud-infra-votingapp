@@ -23,9 +23,10 @@ io.on('connection', function (socket) {
 var postgresUser = process.env.POSTGRES_USER || 'postgres';
 var postgresPassword = process.env.POSTGRES_PASSWORD || 'postgres';
 var postgresDb = process.env.POSTGRES_DB || 'postgres';
+var postgresHost = process.env.POSTGRES_HOST || 'db';
 
 var pool = new Pool({
-  connectionString: `postgres://${postgresUser}:${postgresPassword}@db/${postgresDb}`
+  connectionString: `postgres://${postgresUser}:${postgresPassword}@${postgresHost}/${postgresDb}`
 });
 
 async.retry(

@@ -624,20 +624,101 @@ docker compose down
 
 # Keep volumes for Phase 2
 # Or remove everything: docker compose down -v
+
+# Return to project root for Phase 2
+cd ~/Projects/tactful-votingapp-cloud-infra
 ```
 
 ---
 
-## Phase 2: Kubernetes Testing
+## Phase 2: Kubernetes Testing (Terraform-based)
 
-### Step 1: Check Cluster Status
+### Step 1: Initialize Terraform
+
+```bash
+# Navigate to terraform directory
+cd terraform
+
+# Initialize Terraform (download providers)
+terraform init
+
+# Validate configuration
+terraform validate
+
+# Preview what will be created
+terraform plan
+
+# Check Terraform version
+terraform version
+```
+
+### Step 2: Deploy Infrastructure with Terraform
+
+```bash
+# Deploy complete infrastructure (2-3 minutes)
+# This creates: Minikube cluster, builds images, deploys databases & apps
+# Note: Seed job will NOT run automatically
+terraform apply -auto-approve
+
+# Alternative: Interactive approval
+# terraform apply
+
+# Watch the deployment progress
+# Terraform will:
+# 1. Provision Minikube cluster
+# 2. Build Docker images (vote, result, worker with .NET 8.0 security fixes)
+# 3. Deploy PostgreSQL via Helm (Bitnami chart)
+# 4. Deploy Redis via Helm (Bitnami chart)
+# 5. Deploy application manifests
+# 6. Create configure-hosts.sh helper script
+```
+
+### Step 3: Configure /etc/hosts (Required for Ingress)
+
+```bash
+# IMPORTANT: Terraform will NOT automatically modify /etc/hosts
+# This avoids sudo password prompts during automation
+
+# Option 1: Use the generated helper script (recommended)
+cd terraform
+./configure-hosts.sh
+
+# Option 2: Manual configuration
+MINIKUBE_IP=$(minikube ip -p voting-app-dev)
+echo "$MINIKUBE_IP vote.local" | sudo tee -a /etc/hosts
+echo "$MINIKUBE_IP result.local" | sudo tee -a /etc/hosts
+
+# Verify entries
+grep -E "vote\.local|result\.local" /etc/hosts
+```
+
+### Step 4: Verify Terraform Deployment
+
+```bash
+# Check Terraform state
+terraform show
+
+# List all Terraform resources
+terraform state list
+
+# View outputs
+terraform output
+
+# Check deployment status
+terraform output deployment_status
+
+# View ingress URLs
+terraform output ingress_urls
+
+# View seed job instructions
+terraform output seed_instructions
+```
+
+### Step 5: Check Cluster Status
 
 ```bash
 # Check Minikube status
-minikube status
-
-# If not running, start it
-# minikube start --driver=docker --cpus=4 --memory=8192
+minikube status -p voting-app-dev
 
 # Check kubectl connection
 kubectl cluster-info
@@ -649,27 +730,34 @@ kubectl get nodes -o wide
 kubectl top nodes
 ```
 
-### Step 2: Check Namespaces
+### Step 6: Check Namespaces
 
 ```bash
 # List all namespaces
 kubectl get namespaces
 
-# Check voting-app namespace
+# Check voting-app namespace (created by Terraform)
 kubectl get namespace voting-app
 
 # Describe namespace
 kubectl describe namespace voting-app
 
-# Check namespace labels (PSA)
+# Check namespace labels (PSA - restricted enforced)
 kubectl get namespace voting-app -o yaml | grep -A 5 labels
 ```
 
-### Step 3: Check All Pods
+### Step 7: Check All Pods
 
 ```bash
-# List all pods in voting-app namespace
+# List all pods in voting-app namespace (deployed by Terraform)
 kubectl get pods -n voting-app
+
+# Expected pods:
+# - postgresql-0 (Bitnami Helm chart)
+# - redis-master-0 (Bitnami Helm chart)
+# - vote-xxx (2 replicas)
+# - result-xxx (2 replicas)
+# - worker-xxx (1 replica)
 
 # Wide output with node info
 kubectl get pods -n voting-app -o wide
@@ -681,7 +769,7 @@ kubectl get pods -n voting-app --show-labels
 kubectl get pods -n voting-app --watch
 ```
 
-### Step 4: Test Vote Service
+### Step 8: Test Vote Service
 
 ```bash
 # Check vote deployment
@@ -711,7 +799,7 @@ curl -s http://localhost:8080 | head -10
 kill $PF_PID
 ```
 
-### Step 5: Test Result Service
+### Step 9: Test Result Service
 
 ```bash
 # Check result deployment
@@ -735,7 +823,7 @@ curl -s http://localhost:8081 | head -10
 kill $PF_PID
 ```
 
-### Step 6: Test Worker Service
+### Step 10: Test Worker Service
 
 ```bash
 # Check worker deployment
@@ -751,60 +839,74 @@ kubectl logs -n voting-app -l app=worker --tail=50
 kubectl logs -n voting-app -l app=worker --follow
 ```
 
-### Step 7: Test PostgreSQL (StatefulSet)
+### Step 7: Test PostgreSQL (Bitnami Helm Chart)
 
 ```bash
-# Check PostgreSQL StatefulSet
-kubectl get statefulset postgres -n voting-app
+# Check PostgreSQL StatefulSet (deployed via Helm by Terraform)
+kubectl get statefulset postgresql -n voting-app
 
 # Check PostgreSQL pod
-kubectl get pod postgres-0 -n voting-app
+kubectl get pod postgresql-0 -n voting-app
 
-# Check PostgreSQL service
-kubectl get service postgres -n voting-app
+# Check PostgreSQL service (note: service name is 'postgresql' not 'postgres')
+kubectl get service postgresql -n voting-app
 
 # Check PVC
-kubectl get pvc -n voting-app | grep postgres
+kubectl get pvc -n voting-app | grep postgresql
 
-# Connect to PostgreSQL
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "\dt"
+# Connect to PostgreSQL (using Bitnami chart password)
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -c "\dt"'
 
 # Check votes table
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "SELECT COUNT(*) FROM votes;"
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -c "SELECT COUNT(*) FROM votes;"'
 
 # Check votes by option
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres \
+  -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"'
 
 # Check database connections
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "SELECT count(*) FROM pg_stat_activity;"
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres \
+  -c "SELECT count(*) FROM pg_stat_activity;"'
+
+# Get PostgreSQL password (if needed)
+kubectl get secret -n voting-app postgresql -o jsonpath='{.data.postgres-password}' | base64 -d
+echo ""
 ```
 
-### Step 8: Test Redis (StatefulSet)
+### Step 8: Test Redis (Bitnami Helm Chart)
 
 ```bash
-# Check Redis StatefulSet
-kubectl get statefulset redis -n voting-app
+# Check Redis StatefulSet (deployed via Helm by Terraform)
+kubectl get statefulset redis-master -n voting-app
 
-# Check Redis pod
-kubectl get pod redis-0 -n voting-app
+# Check Redis pod (note: pod name is 'redis-master-0')
+kubectl get pod redis-master-0 -n voting-app
 
-# Check Redis service
-kubectl get service redis -n voting-app
+# Check Redis service (note: service name is 'redis-master' not 'redis')
+kubectl get service redis-master -n voting-app
 
 # Check PVC
 kubectl get pvc -n voting-app | grep redis
 
 # Connect to Redis
-kubectl exec -n voting-app redis-0 -- redis-cli ping
+kubectl exec -n voting-app redis-master-0 -- redis-cli ping
 
 # Check Redis info
-kubectl exec -n voting-app redis-0 -- redis-cli INFO server
+kubectl exec -n voting-app redis-master-0 -- redis-cli INFO server
 
 # Check Redis memory
-kubectl exec -n voting-app redis-0 -- redis-cli INFO memory | grep used_memory_human
+kubectl exec -n voting-app redis-master-0 -- redis-cli INFO memory | grep used_memory_human
 
 # Check votes queue
-kubectl exec -n voting-app redis-0 -- redis-cli LLEN votes
+kubectl exec -n voting-app redis-master-0 -- redis-cli LLEN votes
+
+# Get Redis password (if needed)
+kubectl get secret -n voting-app redis -o jsonpath='{.data.redis-password}' | base64 -d
+echo ""
 ```
 
 ### Step 9: Test Ingress
@@ -897,35 +999,65 @@ kubectl top pods -n voting-app
 kubectl describe nodes | grep -A 5 "Allocated resources"
 ```
 
-### Step 14: Test Seed Job
+### Step 14: Test Seed Job (Separate Terraform Command)
 
 ```bash
-# Check if seed job exists
-kubectl get job seed -n voting-app
+# Navigate to terraform directory
+cd terraform
 
-# Check seed job status
-kubectl describe job seed -n voting-app
+# Run seed job independently (6 minutes)
+# This generates 3000 test votes
+terraform apply -target=null_resource.run_seed -auto-approve
 
-# Check seed pod
-kubectl get pods -n voting-app -l job-name=seed
+# The seed job will:
+# 1. Delete any existing seed pod
+# 2. Deploy new seed pod
+# 3. Generate 3000 votes (2000 Cats, 1000 Dogs)
+# 4. Show real-time progress
+# 5. Display final vote counts
 
-# Check seed logs
-kubectl logs -n voting-app -l job-name=seed
-
-# Count votes before re-running seed
-BEFORE=$(kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;")
-echo "Votes before seed: $BEFORE"
-
-# Delete and re-apply seed job
-kubectl delete job seed -n voting-app
+# Alternative: Manual seed deployment (without Terraform)
+cd ..
+kubectl delete pod seed -n voting-app --ignore-not-found=true
 kubectl apply -f k8s/manifests/10-seed.yaml
 
 # Wait for completion
-kubectl wait --for=condition=complete job/seed -n voting-app --timeout=5m
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/seed -n voting-app --timeout=600s
+
+# Check seed logs
+kubectl logs seed -n voting-app --tail=20
+
+# Check seed pod status
+kubectl get pod seed -n voting-app
+```
+
+### Step 14b: Verify Seed Data
+
+```bash
+# Count votes before seed
+BEFORE=$(kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;"')
+echo "Votes before seed: $BEFORE"
+
+# Run seed via Terraform (from terraform directory)
+cd terraform
+terraform apply -target=null_resource.run_seed -auto-approve
+cd ..
 
 # Count votes after seed
-AFTER=$(kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;")
+AFTER=$(kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;"')
 echo "Votes after seed: $AFTER"
+
+# Show vote breakdown
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres \
+  -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote ORDER BY vote;"'
+
+# Re-run seed for more test data (adds another 3000 votes)
+cd terraform
+terraform apply -target=null_resource.run_seed -auto-approve
+cd ..
 ```
 
 ### Step 15: Test High Availability
@@ -955,24 +1087,30 @@ curl -s http://vote.local | head -10
 ### Step 16: Test Persistence
 
 ```bash
-# Check PVCs
+# Check PVCs (created by Terraform via Helm)
 kubectl get pvc -n voting-app
+
+# Expected PVCs:
+# - data-postgresql-0 (5Gi for PostgreSQL)
+# - redis-data-redis-master-0 (2Gi for Redis)
 
 # Check PVC status and size
 kubectl describe pvc -n voting-app
 
 # Get current vote count
-VOTES=$(kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;")
+VOTES=$(kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;"')
 echo "Current votes: $VOTES"
 
 # Delete postgres pod (data should persist)
-kubectl delete pod postgres-0 -n voting-app
+kubectl delete pod postgresql-0 -n voting-app
 
 # Wait for pod to recreate
-kubectl wait --for=condition=ready pod/postgres-0 -n voting-app --timeout=5m
+kubectl wait --for=condition=ready pod/postgresql-0 -n voting-app --timeout=5m
 
 # Verify votes still there
-NEW_VOTES=$(kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;")
+NEW_VOTES=$(kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres -t -c "SELECT COUNT(*) FROM votes;"')
 echo "Votes after pod recreation: $NEW_VOTES"
 
 if [ "$VOTES" == "$NEW_VOTES" ]; then
@@ -987,9 +1125,11 @@ fi
 ```bash
 # Get current vote counts
 echo "=== Before Test ==="
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres \
+  -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"'
 
-# Submit 10 votes via vote.local
+# Submit 10 votes via vote.local (Ingress configured by Terraform)
 for i in {1..10}; do
     curl -X POST http://vote.local -d "vote=a" -H "Content-Type: application/x-www-form-urlencoded"
     echo "Vote $i submitted"
@@ -1001,10 +1141,47 @@ sleep 10
 
 # Check updated counts
 echo "=== After Test ==="
-kubectl exec -n voting-app postgres-0 -- psql -U postgres -d postgres -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"
+kubectl exec -n voting-app postgresql-0 -- \
+  sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" psql -U postgres -d postgres \
+  -c "SELECT vote, COUNT(*) as count FROM votes GROUP BY vote;"'
 
 # Check result page
 curl -s http://result.local | grep -o '[0-9]*%' | head -2
+```
+
+### Step 18: Terraform Cleanup (Optional)
+
+```bash
+# Navigate to terraform directory
+cd terraform
+
+# View what will be destroyed
+terraform plan -destroy
+
+# Destroy all Terraform-managed infrastructure
+terraform destroy -auto-approve
+
+# This will:
+# 1. Delete all application deployments
+# 2. Uninstall Helm releases (PostgreSQL, Redis)
+# 3. Delete namespace
+# 4. Delete Minikube cluster
+# 5. Clean up /etc/hosts entries
+
+# Verify cleanup
+minikube status -p voting-app-dev  # Should show: does not exist
+
+# Alternative: Keep cluster, destroy only apps
+terraform destroy -target=null_resource.deploy_application -auto-approve
+terraform destroy -target=null_resource.deploy_databases -auto-approve
+
+# Manual cleanup if needed
+minikube delete -p voting-app-dev
+kubectl config delete-context voting-app-dev
+
+# Remove Terraform state files (if starting fresh)
+rm -f terraform.tfstate*
+rm -rf .terraform/
 ```
 
 ---
@@ -2033,6 +2210,314 @@ kubectl describe ingress voting-app-ingress -n voting-app
 # Check Ingress controller
 kubectl get pods -n ingress-nginx
 kubectl logs -n ingress-nginx -l app.kubernetes.io/component=controller
+```
+
+---
+
+## Complete Cleanup and Reset
+
+### Option 1: Full System Reset (Nuclear Option)
+
+```bash
+echo "=== COMPLETE SYSTEM CLEANUP ==="
+echo ""
+
+# 1. Destroy Terraform infrastructure
+echo "1. Destroying Terraform resources..."
+cd ~/Projects/tactful-votingapp-cloud-infra/terraform
+terraform destroy -auto-approve 2>/dev/null || echo "Terraform already destroyed or not initialized"
+
+# 2. Delete Minikube cluster
+echo ""
+echo "2. Deleting Minikube cluster..."
+minikube delete -p voting-app-dev
+minikube delete  # Delete default profile too
+
+# 3. Stop Docker Compose
+echo ""
+echo "3. Stopping Docker Compose..."
+cd ~/Projects/tactful-votingapp-cloud-infra
+docker compose down -v --remove-orphans
+
+# 4. Remove all project Docker images
+echo ""
+echo "4. Removing project Docker images..."
+docker rmi tactful-votingapp-cloud-infra-vote:latest 2>/dev/null || true
+docker rmi tactful-votingapp-cloud-infra-result:latest 2>/dev/null || true
+docker rmi tactful-votingapp-cloud-infra-worker:latest 2>/dev/null || true
+docker rmi tactful-votingapp-cloud-infra-seed-data:latest 2>/dev/null || true
+
+# 5. Remove all Docker volumes
+echo ""
+echo "5. Removing Docker volumes..."
+docker volume rm tactful-votingapp-cloud-infra_db-data 2>/dev/null || true
+docker volume rm tactful-votingapp-cloud-infra_redis-data 2>/dev/null || true
+docker volume prune -f
+
+# 6. Clean Docker system
+echo ""
+echo "6. Cleaning Docker system..."
+docker system prune -af --volumes
+
+# 7. Remove Terraform state
+echo ""
+echo "7. Removing Terraform state files..."
+cd ~/Projects/tactful-votingapp-cloud-infra/terraform
+rm -f terraform.tfstate*
+rm -f tfplan
+rm -rf .terraform/
+rm -f .terraform.lock.hcl
+rm -f kubeconfig-dev
+
+# 8. Remove kubectl contexts
+echo ""
+echo "8. Cleaning kubectl contexts..."
+kubectl config delete-context voting-app-dev 2>/dev/null || true
+kubectl config delete-context minikube 2>/dev/null || true
+
+# 9. Clean /etc/hosts entries
+echo ""
+echo "9. Removing /etc/hosts entries..."
+sudo sed -i.bak '/vote\.local/d' /etc/hosts
+sudo sed -i.bak '/result\.local/d' /etc/hosts
+
+# 10. Clean Helm releases (if any remain)
+echo ""
+echo "10. Removing Helm releases..."
+helm uninstall postgresql -n voting-app 2>/dev/null || true
+helm uninstall redis -n voting-app 2>/dev/null || true
+helm uninstall prometheus -n monitoring 2>/dev/null || true
+helm uninstall loki -n monitoring 2>/dev/null || true
+
+# 11. Remove all Kubernetes namespaces
+echo ""
+echo "11. Removing Kubernetes namespaces..."
+kubectl delete namespace voting-app --force --grace-period=0 2>/dev/null || true
+kubectl delete namespace monitoring --force --grace-period=0 2>/dev/null || true
+
+# 12. Stop all Docker containers
+echo ""
+echo "12. Stopping all Docker containers..."
+docker stop $(docker ps -aq) 2>/dev/null || true
+docker rm $(docker ps -aq) 2>/dev/null || true
+
+# 13. Clean temp files
+echo ""
+echo "13. Cleaning temporary files..."
+rm -f /tmp/vote.html /tmp/result.html /tmp/docker-compose-logs.txt
+rm -f /tmp/helm-*.yaml /tmp/prometheus-*.yaml
+rm -f /tmp/grafana-*.txt
+
+echo ""
+echo "==================================="
+echo "✅ COMPLETE CLEANUP FINISHED"
+echo "==================================="
+echo ""
+echo "System is now clean. Ready for fresh deployment!"
+```
+
+### Option 2: Terraform-Only Cleanup
+
+```bash
+# Navigate to terraform directory
+cd ~/Projects/tactful-votingapp-cloud-infra/terraform
+
+# Show what will be destroyed
+terraform plan -destroy
+
+# Destroy all resources
+terraform destroy -auto-approve
+
+# Clean Terraform state
+rm -f terraform.tfstate*
+rm -rf .terraform/
+rm -f .terraform.lock.hcl
+
+# Delete Minikube cluster manually
+minikube delete -p voting-app-dev
+
+# Verify cleanup
+minikube status -p voting-app-dev  # Should show: does not exist
+terraform state list  # Should show: empty or error
+```
+
+### Option 3: Kubernetes-Only Cleanup
+
+```bash
+# Delete voting-app namespace (removes all resources)
+kubectl delete namespace voting-app --force --grace-period=0
+
+# Delete monitoring namespace
+kubectl delete namespace monitoring --force --grace-period=0
+
+# Uninstall Helm releases
+helm uninstall postgresql -n voting-app 2>/dev/null || true
+helm uninstall redis -n voting-app 2>/dev/null || true
+
+# Delete Minikube cluster
+minikube delete -p voting-app-dev
+
+# Clean kubectl config
+kubectl config delete-context voting-app-dev
+kubectl config unset current-context
+```
+
+### Option 4: Docker Compose Only Cleanup
+
+```bash
+# Stop and remove all containers, networks, volumes
+cd ~/Projects/tactful-votingapp-cloud-infra
+docker compose down -v --remove-orphans
+
+# Remove project images
+docker rmi -f $(docker images | grep tactful-votingapp | awk '{print $3}')
+
+# Clean Docker system
+docker system prune -af --volumes
+
+# Verify cleanup
+docker ps -a  # Should show no containers
+docker images  # Should show no project images
+docker volume ls  # Should show no project volumes
+```
+
+### Option 5: Selective Cleanup
+
+```bash
+# Only remove seed pod
+kubectl delete pod seed -n voting-app --force --grace-period=0
+
+# Only remove application pods (keep databases)
+kubectl delete deployment vote result worker -n voting-app
+
+# Only remove databases
+helm uninstall postgresql -n voting-app
+helm uninstall redis -n voting-app
+
+# Only remove Terraform seed resource
+cd terraform
+terraform destroy -target=null_resource.run_seed -auto-approve
+
+# Only remove specific Terraform resources
+terraform destroy -target=null_resource.deploy_application -auto-approve
+terraform destroy -target=null_resource.deploy_databases -auto-approve
+```
+
+### Verification After Cleanup
+
+```bash
+echo "=== VERIFYING CLEANUP ==="
+echo ""
+
+# Check Docker
+echo "1. Docker Status:"
+echo "Containers: $(docker ps -a --format '{{.Names}}' | wc -l)"
+echo "Images: $(docker images --format '{{.Repository}}' | grep tactful | wc -l)"
+echo "Volumes: $(docker volume ls --format '{{.Name}}' | grep tactful | wc -l)"
+echo ""
+
+# Check Kubernetes
+echo "2. Kubernetes Status:"
+minikube status -p voting-app-dev 2>&1 | grep "does not exist" && echo "✓ Minikube deleted" || echo "⚠ Minikube still exists"
+kubectl get namespace voting-app 2>&1 | grep "NotFound" && echo "✓ Namespace deleted" || echo "⚠ Namespace still exists"
+echo ""
+
+# Check Terraform
+echo "3. Terraform Status:"
+cd ~/Projects/tactful-votingapp-cloud-infra/terraform
+[ ! -f terraform.tfstate ] && echo "✓ Terraform state removed" || echo "⚠ Terraform state exists"
+[ ! -d .terraform ] && echo "✓ Terraform cache removed" || echo "⚠ Terraform cache exists"
+echo ""
+
+# Check /etc/hosts
+echo "4. /etc/hosts Status:"
+grep -q "vote.local" /etc/hosts && echo "⚠ vote.local still in /etc/hosts" || echo "✓ vote.local removed"
+grep -q "result.local" /etc/hosts && echo "⚠ result.local still in /etc/hosts" || echo "✓ result.local removed"
+echo ""
+
+# Check Helm
+echo "5. Helm Releases:"
+helm list -A | grep -E "voting-app|monitoring" && echo "⚠ Helm releases still exist" || echo "✓ No Helm releases"
+echo ""
+
+echo "==================================="
+echo "Cleanup verification complete!"
+echo "==================================="
+```
+
+### Start Fresh After Cleanup
+
+```bash
+# 1. Clean everything
+cd ~/Projects/tactful-votingapp-cloud-infra/terraform
+terraform destroy -auto-approve
+minikube delete -p voting-app-dev
+cd ~/Projects/tactful-votingapp-cloud-infra
+docker compose down -v
+
+# 2. Clean Terraform state
+cd terraform
+rm -f terraform.tfstate* tfplan kubeconfig-dev
+rm -rf .terraform/
+
+# 3. Initialize fresh Terraform
+terraform init
+
+# 4. Deploy fresh infrastructure
+terraform apply -auto-approve
+
+# 5. Wait for everything to be ready
+sleep 60
+
+# 6. Verify deployment
+kubectl get pods -n voting-app
+terraform output
+
+# 7. Run seed job (optional)
+terraform apply -target=null_resource.run_seed -auto-approve
+
+# 8. Test application
+curl http://vote.local
+curl http://result.local
+
+echo ""
+echo "✅ Fresh deployment complete!"
+```
+
+### Troubleshooting Stuck Resources
+
+```bash
+# Force delete stuck namespace
+kubectl get namespace voting-app -o json | \
+  jq '.spec.finalizers = []' | \
+  kubectl replace --raw "/api/v1/namespaces/voting-app/finalize" -f -
+
+# Force delete stuck pods
+kubectl delete pod --all -n voting-app --force --grace-period=0
+
+# Force delete stuck PVCs
+kubectl delete pvc --all -n voting-app --force --grace-period=0
+
+# Force delete stuck StatefulSets
+kubectl delete statefulset --all -n voting-app --force --grace-period=0
+
+# Remove finalizers from PVCs
+for pvc in $(kubectl get pvc -n voting-app -o name); do
+    kubectl patch $pvc -n voting-app -p '{"metadata":{"finalizers":null}}'
+done
+
+# Force remove Helm release
+helm uninstall postgresql -n voting-app --wait=false
+kubectl delete secret -n voting-app -l owner=helm
+
+# Clean Minikube completely
+minikube delete --all --purge
+
+# Clean Docker networks
+docker network prune -f
+
+# Clean Docker build cache
+docker builder prune -af
 ```
 
 ---

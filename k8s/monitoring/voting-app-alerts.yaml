@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: voting-app-alerts
+  namespace: monitoring
+  labels:
+    prometheus: kube-prometheus
+data:
+  voting-app.rules: |
+    groups:
+    - name: voting-app-alerts
+      interval: 30s
+      rules:
+      
+      # Pod Down Alert
+      - alert: VotingAppPodDown
+        expr: kube_deployment_status_replicas_available{namespace="voting-app"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: voting-app
+        annotations:
+          summary: "Voting App pod is down"
+          description: "Deployment {{ $labels.deployment }} has no available replicas for 2 minutes"
+      
+      # Low Replicas Alert
+      - alert: VotingAppLowReplicas
+        expr: kube_deployment_status_replicas_available{namespace="voting-app",deployment=~"vote|result"} < 2
+        for: 5m
+        labels:
+          severity: warning
+          component: voting-app
+        annotations:
+          summary: "Low replica count for {{ $labels.deployment }}"
+          description: "{{ $labels.deployment }} has only {{ $value }} replicas (expected 2)"
+      
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: (container_memory_working_set_bytes{namespace="voting-app",container!="",container!="POD"} / container_spec_memory_limit_bytes{namespace="voting-app"}) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "High memory usage in {{ $labels.pod }}"
+          description: "Pod {{ $labels.pod }} is using {{ $value | humanizePercentage }} of its memory limit"
+      
+      # High CPU Usage
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{namespace="voting-app",container!="",container!="POD"}[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          component: performance
+        annotations:
+          summary: "High CPU usage in {{ $labels.pod }}"
+          description: "Pod {{ $labels.pod }} CPU usage is {{ $value | humanize }}"
+      
+      # Pod Restart Alert
+      - alert: PodFrequentlyRestarting
+        expr: rate(kube_pod_container_status_restarts_total{namespace="voting-app"}[15m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: stability
+        annotations:
+          summary: "Pod {{ $labels.pod }} is restarting frequently"
+          description: "Pod {{ $labels.pod }} has restarted {{ $value }} times in the last 15 minutes"
+      
+      # PostgreSQL Down
+      - alert: PostgreSQLDown
+        expr: kube_statefulset_status_replicas_ready{namespace="voting-app",statefulset="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQL is down"
+          description: "PostgreSQL database has no ready replicas"
+      
+      # Redis Down
+      - alert: RedisDown
+        expr: kube_statefulset_status_replicas_ready{namespace="voting-app",statefulset="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: cache
+        annotations:
+          summary: "Redis is down"
+          description: "Redis cache has no ready replicas"
+      
+      # Persistent Volume Low Space
+      - alert: PersistentVolumeLowSpace
+        expr: (kubelet_volume_stats_available_bytes / kubelet_volume_stats_capacity_bytes) < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          component: storage
+        annotations:
+          summary: "PVC {{ $labels.persistentvolumeclaim }} is running low on space"
+          description: "Only {{ $value | humanizePercentage }} space remaining"
