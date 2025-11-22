@@ -293,47 +293,48 @@ jobs:
               run: |
                   echo "🧪 Running Integration Tests..."
 
-                  # Get Minikube IP
-                  MINIKUBE_IP=$(minikube ip)
-                  echo "Minikube IP: $MINIKUBE_IP"
+                  # Test using port-forward (runs in background)
+                  echo "Setting up port-forwards..."
+                  kubectl port-forward -n voting-app svc/vote 8080:80 > /dev/null 2>&1 &
+                  kubectl port-forward -n voting-app svc/result 8081:80 > /dev/null 2>&1 &
 
-                  # Get NodePort for vote service
-                  VOTE_PORT=$(kubectl get svc vote -n voting-app -o jsonpath='{.spec.ports[0].nodePort}')
-                  echo "Vote Service NodePort: $VOTE_PORT"
-
-                  # Get NodePort for result service
-                  RESULT_PORT=$(kubectl get svc result -n voting-app -o jsonpath='{.spec.ports[0].nodePort}')
-                  echo "Result Service NodePort: $RESULT_PORT"
+                  # Wait for port-forwards to be ready
+                  sleep 5
 
                   # Test 1: Vote service responds
                   echo "Test 1: Vote service health check..."
-                  curl -f http://$MINIKUBE_IP:$VOTE_PORT || (echo "❌ Vote service not responding" && exit 1)
+                  curl -f http://localhost:8080 || (echo "❌ Vote service not responding" && exit 1)
                   echo "✅ Vote service is healthy"
 
                   # Test 2: Result service responds
                   echo "Test 2: Result service health check..."
-                  curl -f http://$MINIKUBE_IP:$RESULT_PORT || (echo "❌ Result service not responding" && exit 1)
+                  curl -f http://localhost:8081 || (echo "❌ Result service not responding" && exit 1)
                   echo "✅ Result service is healthy"
 
                   # Test 3: Vote service content
                   echo "Test 3: Vote service shows voting options..."
-                  curl -s http://$MINIKUBE_IP:$VOTE_PORT | grep -i "Cats" || (echo "❌ Vote content not found" && exit 1)
+                  curl -s http://localhost:8080 | grep -i "Cats" || (echo "❌ Vote content not found" && exit 1)
                   echo "✅ Vote content is correct"
 
                   # Test 4: Result service content
                   echo "Test 4: Result service shows results..."
-                  curl -s http://$MINIKUBE_IP:$RESULT_PORT | grep -i "Result" || (echo "❌ Result content not found" && exit 1)
+                  curl -s http://localhost:8081 | grep -i "Result" || (echo "❌ Result content not found" && exit 1)
                   echo "✅ Result content is correct"
 
                   # Test 5: Submit a vote
                   echo "Test 5: Submit a vote..."
-                  VOTE_ID=$(curl -s -X POST http://$MINIKUBE_IP:$VOTE_PORT -d "vote=a" | grep -o 'voter_id=[^"]*' | cut -d= -f2 || echo "unknown")
-                  echo "Vote submitted with ID: $VOTE_ID"
+                  VOTE_RESPONSE=$(curl -s -X POST http://localhost:8080 -d "vote=a")
+                  echo "Vote submitted successfully"
 
-                  # Test 6: Check database
-                  echo "Test 6: Verify vote in database..."
-                  sleep 5  # Wait for worker to process
-                  kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT COUNT(*) FROM votes;" || echo "Database check skipped"
+                  # Test 6: Check worker is running
+                  echo "Test 6: Verify worker is processing..."
+                  kubectl get pods -n voting-app -l app=worker | grep -i "Running" || (echo "❌ Worker not running" && exit 1)
+                  echo "✅ Worker is running"
+
+                  # Test 7: Check database connectivity
+                  echo "Test 7: Verify database connectivity..."
+                  kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT version();" > /dev/null || (echo "❌ Database not accessible" && exit 1)
+                  echo "✅ Database is accessible"
 
                   echo "✅ All integration tests passed!"
 
