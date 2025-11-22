@@ -332,7 +332,7 @@ jobs:
 
                   # Test 4: Result service content
                   echo "Test 4: Result service shows results..."
-                  curl -s http://localhost:8081 | grep -iE "(Cats|Dogs|aPercent|bPercent)" || (echo "❌ Result content not found" && exit 1)
+                  curl -s http://localhost:8081 | grep -iE "(Cats vs Dogs|ng-app|statsCtrl)" || (echo "❌ Result content not found" && exit 1)
                   echo "✅ Result content is correct"
 
                   # Test 5: Submit a vote
