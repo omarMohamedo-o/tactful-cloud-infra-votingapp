@@ -295,21 +295,36 @@ jobs:
 
                   # Test using port-forward (runs in background)
                   echo "Setting up port-forwards..."
-                  kubectl port-forward -n voting-app svc/vote 8080:80 > /dev/null 2>&1 &
-                  kubectl port-forward -n voting-app svc/result 8081:80 > /dev/null 2>&1 &
+                  kubectl port-forward -n voting-app svc/vote 8080:80 > /tmp/vote-pf.log 2>&1 &
+                  VOTE_PF_PID=$!
+                  kubectl port-forward -n voting-app svc/result 8081:80 > /tmp/result-pf.log 2>&1 &
+                  RESULT_PF_PID=$!
 
                   # Wait for port-forwards to be ready
-                  sleep 5
+                  echo "Waiting for port-forwards to stabilize..."
+                  sleep 10
 
                   # Test 1: Vote service responds
                   echo "Test 1: Vote service health check..."
-                  curl -f http://localhost:8080 || (echo "❌ Vote service not responding" && exit 1)
-                  echo "✅ Vote service is healthy"
+                  for i in {1..5}; do
+                    if curl -f http://localhost:8080 2>/dev/null; then
+                      echo "✅ Vote service is healthy"
+                      break
+                    fi
+                    echo "Retry $i/5..."
+                    sleep 2
+                  done || (echo "❌ Vote service not responding" && cat /tmp/vote-pf.log && exit 1)
 
                   # Test 2: Result service responds
                   echo "Test 2: Result service health check..."
-                  curl -f http://localhost:8081 || (echo "❌ Result service not responding" && exit 1)
-                  echo "✅ Result service is healthy"
+                  for i in {1..5}; do
+                    if curl -f http://localhost:8081 2>/dev/null; then
+                      echo "✅ Result service is healthy"
+                      break
+                    fi
+                    echo "Retry $i/5..."
+                    sleep 2
+                  done || (echo "❌ Result service not responding" && cat /tmp/result-pf.log && exit 1)
 
                   # Test 3: Vote service content
                   echo "Test 3: Vote service shows voting options..."
@@ -336,9 +351,10 @@ jobs:
                   kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT version();" > /dev/null || (echo "❌ Database not accessible" && exit 1)
                   echo "✅ Database is accessible"
 
-                  echo "✅ All integration tests passed!"
+                  # Cleanup port-forwards
+                  kill $VOTE_PF_PID $RESULT_PF_PID 2>/dev/null || true
 
-            # Show logs on failure
+                  echo "✅ All integration tests passed!"            # Show logs on failure
             - name: Show logs on failure
               if: failure()
               run: |
