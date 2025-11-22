@@ -1,520 +1,521 @@
 name: CI/CD with Minikube Testing
 
 on:
-    push:
-        branches: [main, develop]
-        paths:
-            - "vote/**"
-            - "result/**"
-            - "worker/**"
-            - "k8s/**"
-            - "terraform/**"
-            - ".github/workflows/ci-cd-with-minikube.yml"
-    pull_request:
-        branches: [main]
-    workflow_dispatch:
-        inputs:
-            skip_minikube_tests:
-                description: "Skip Minikube integration tests"
-                required: false
-                default: false
-                type: boolean
+  push:
+    branches: [main, develop]
+    paths:
+      - "vote/**"
+      - "result/**"
+      - "worker/**"
+      - "k8s/**"
+      - "terraform/**"
+      - ".github/workflows/ci-cd-with-minikube.yml"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_minikube_tests:
+        description: "Skip Minikube integration tests"
+        required: false
+        default: false
+        type: boolean
 
 env:
-    REGISTRY: ghcr.io
-    IMAGE_TAG: ${{ github.sha }}
-    MINIKUBE_VERSION: v1.32.0
-    KUBERNETES_VERSION: v1.28.3
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.sha }}
+  MINIKUBE_VERSION: v1.32.0
+  KUBERNETES_VERSION: v1.28.3
 
 jobs:
-    # Job 1: Build Images
-    build-images:
-        name: Build & Scan Images
-        runs-on: ubuntu-latest
-        permissions:
-            contents: read
-            packages: write
-            security-events: write
-
-        strategy:
-            matrix:
-                service: [vote, result, worker]
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Set lowercase repository name
-              id: repo
-              run: echo "repository=$(echo '${{ github.repository }}' | tr [:upper:] [:lower:])" >> $GITHUB_OUTPUT
-
-            - name: Set up Docker Buildx
-              uses: docker/setup-buildx-action@v3
-
-            - name: Log in to GitHub Container Registry
-              uses: docker/login-action@v3
-              with:
-                  registry: ${{ env.REGISTRY }}
-                  username: ${{ github.actor }}
-                  password: ${{ secrets.GITHUB_TOKEN }}
-
-            - name: Extract metadata
-              id: meta
-              uses: docker/metadata-action@v5
-              with:
-                  images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}
-                  tags: |
-                      type=sha,prefix=,format=long
-                      type=ref,event=branch
-                      type=ref,event=pr
-                      type=raw,value=latest,enable={{is_default_branch}}
-
-            - name: Build ${{ matrix.service }} image
-              uses: docker/build-push-action@v5
-              with:
-                  context: ./${{ matrix.service }}
-                  push: false
-                  load: true
-                  tags: |
-                      ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
-                      ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:latest
-                  labels: ${{ steps.meta.outputs.labels }}
-                  cache-from: type=gha,scope=${{ matrix.service }}
-                  cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
-            - name: Run Trivy security scan
-              uses: aquasecurity/trivy-action@master
-              with:
-                  image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
-                  format: "sarif"
-                  output: "trivy-${{ matrix.service }}-results.sarif"
-                  severity: "CRITICAL,HIGH"
-
-            - name: Upload Trivy results to GitHub Security
-              uses: github/codeql-action/upload-sarif@v3
-              if: always()
-              with:
-                  sarif_file: "trivy-${{ matrix.service }}-results.sarif"
-                  category: "${{ matrix.service }}-image"
-
-            - name: Push ${{ matrix.service }} image
-              if: github.event_name != 'pull_request'
-              uses: docker/build-push-action@v5
-              with:
-                  context: ./${{ matrix.service }}
-                  push: true
-                  tags: |
-                      ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
-                      ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:latest
-                  labels: ${{ steps.meta.outputs.labels }}
-                  cache-from: type=gha,scope=${{ matrix.service }}
-                  cache-to: type=gha,mode=max,scope=${{ matrix.service }}
-
-            - name: Save ${{ matrix.service }} image for Minikube
-              run: |
-                  docker save ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }} -o ${{ matrix.service }}-image.tar
-
-            - name: Upload ${{ matrix.service }} image artifact
-              uses: actions/upload-artifact@v4
-              with:
-                  name: ${{ matrix.service }}-image
-                  path: ${{ matrix.service }}-image.tar
-                  retention-days: 1
-
-    # Job 2: Deploy and Test in Minikube
-    minikube-integration-test:
-        name: Minikube Integration Tests
-        runs-on: ubuntu-latest
-        needs: build-images
-        if: ${{ !inputs.skip_minikube_tests }}
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Set lowercase repository name
-              id: repo
-              run: echo "repository=$(echo '${{ github.repository }}' | tr [:upper:] [:lower:])" >> $GITHUB_OUTPUT
-
-            # Install Minikube
-            - name: Install Minikube
-              run: |
-                  curl -LO https://storage.googleapis.com/minikube/releases/${{ env.MINIKUBE_VERSION }}/minikube-linux-amd64
-                  sudo install minikube-linux-amd64 /usr/local/bin/minikube
-                  minikube version
-
-            # Install kubectl
-            - name: Install kubectl
-              run: |
-                  curl -LO "https://dl.k8s.io/release/${{ env.KUBERNETES_VERSION }}/bin/linux/amd64/kubectl"
-                  sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-                  kubectl version --client
-
-            # Install Helm
-            - name: Install Helm
-              run: |
-                  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-                  helm version
-
-            # Start Minikube
-            - name: Start Minikube
-              run: |
-                  minikube start \
-                    --driver=docker \
-                    --kubernetes-version=${{ env.KUBERNETES_VERSION }} \
-                    --cpus=2 \
-                    --memory=4096 \
-                    --addons=ingress,metrics-server \
-                    --wait=all
-
-                  minikube status
-                  kubectl cluster-info
-                  kubectl get nodes
-
-            # Set KUBECONFIG for all subsequent steps
-            - name: Configure KUBECONFIG
-              run: |
-                  # Update kubeconfig context to use minikube
-                  kubectl config use-context minikube
-
-                  # Verify connection
-                  kubectl get nodes
-                  kubectl get namespaces
-
-                  echo "✅ KUBECONFIG configured successfully"            # Download built images
-            - name: Download vote image
-              uses: actions/download-artifact@v4
-              with:
-                  name: vote-image
-
-            - name: Download result image
-              uses: actions/download-artifact@v4
-              with:
-                  name: result-image
-
-            - name: Download worker image
-              uses: actions/download-artifact@v4
-              with:
-                  name: worker-image
-
-            # Load images into Minikube
-            - name: Load images into Minikube
-              run: |
-                  minikube image load vote-image.tar
-                  minikube image load result-image.tar
-                  minikube image load worker-image.tar
-
-                  # Verify images
-                  minikube image ls | grep -E 'vote|result|worker'
-
-            # Create namespace
-            - name: Create voting-app namespace
-              run: |
-                  kubectl create namespace voting-app
-                  kubectl label namespace voting-app \
-                    pod-security.kubernetes.io/enforce=baseline \
-                    pod-security.kubernetes.io/audit=baseline \
-                    pod-security.kubernetes.io/warn=baseline
-
-            # Deploy PostgreSQL
-            - name: Deploy PostgreSQL with Helm
-              run: |
-                  helm repo add bitnami https://charts.bitnami.com/bitnami
-                  helm repo update
-
-                  helm upgrade --install postgresql bitnami/postgresql \
-                    --namespace voting-app \
-                    --values k8s/helm/postgresql-values-dev.yaml \
-                    --wait \
-                    --timeout 5m
-
-                  kubectl wait --for=condition=ready pod \
-                    -l app.kubernetes.io/name=postgresql \
-                    -n voting-app \
-                    --timeout=300s
-
-            # Deploy Redis
-            - name: Deploy Redis with Helm
-              run: |
-                  helm upgrade --install redis bitnami/redis \
-                    --namespace voting-app \
-                    --values k8s/helm/redis-values-dev.yaml \
-                    --wait \
-                    --timeout 5m
-
-                  kubectl wait --for=condition=ready pod \
-                    -l app.kubernetes.io/name=redis \
-                    -n voting-app \
-                    --timeout=300s
-
-            # Deploy application manifests
-            - name: Deploy application manifests
-              run: |
-                  # Update image tags in manifests to use built images
-                  sed -i "s|image:.*vote:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/vote:${{ github.sha }}|g" k8s/manifests/05-vote.yaml
-                  sed -i "s|image:.*result:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/result:${{ github.sha }}|g" k8s/manifests/06-result.yaml
-                  sed -i "s|image:.*worker:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/worker:${{ github.sha }}|g" k8s/manifests/07-worker.yaml
-
-                  # Create secrets dynamically to avoid base64 patch issues
-                  kubectl create secret generic postgres-secret \
-                    --from-literal=postgres-user=postgres \
-                    --from-literal=postgres-password=postgres \
-                    --from-literal=postgres-db=postgres \
-                    --dry-run=client -o yaml | kubectl apply -f - -n voting-app
-
-                  kubectl create secret generic redis-secret \
-                    --from-literal=redis-password="" \
-                    --dry-run=client -o yaml | kubectl apply -f - -n voting-app
-
-                  # Apply other manifests
-                  kubectl apply -f k8s/manifests/02-configmap.yaml -n voting-app
-                  kubectl apply -f k8s/manifests/05-vote.yaml -n voting-app
-                  kubectl apply -f k8s/manifests/06-result.yaml -n voting-app
-                  kubectl apply -f k8s/manifests/07-worker.yaml -n voting-app
-                  kubectl apply -f k8s/manifests/08-network-policies.yaml -n voting-app || true
-                  kubectl apply -f k8s/manifests/09-ingress.yaml -n voting-app
-
-            # Wait for all pods to be ready
-            - name: Wait for application pods
-              run: |
-                  echo "Waiting for vote pods..."
-                  kubectl wait --for=condition=ready pod \
-                    -l app=vote \
-                    -n voting-app \
-                    --timeout=300s
-
-                  echo "Waiting for result pods..."
-                  kubectl wait --for=condition=ready pod \
-                    -l app=result \
-                    -n voting-app \
-                    --timeout=300s
-
-                  echo "Waiting for worker pods..."
-                  kubectl wait --for=condition=ready pod \
-                    -l app=worker \
-                    -n voting-app \
-                    --timeout=300s
-
-                  # Show all pods
-                  kubectl get pods -n voting-app
-
-            # Run integration tests
-            - name: Run integration tests
-              run: |
-                  echo "🧪 Running Integration Tests..."
-
-                  # Test using port-forward (runs in background)
-                  echo "Setting up port-forwards..."
-                  kubectl port-forward -n voting-app svc/vote 8080:80 > /tmp/vote-pf.log 2>&1 &
-                  VOTE_PF_PID=$!
-                  kubectl port-forward -n voting-app svc/result 8081:80 > /tmp/result-pf.log 2>&1 &
-                  RESULT_PF_PID=$!
-
-                  # Wait for port-forwards to be ready and services to initialize
-                  echo "Waiting for port-forwards and services to stabilize..."
-                  echo "Result service needs time to connect to database..."
-                  sleep 30                  # Test 1: Vote service responds
-                  echo "Test 1: Vote service health check..."
-                  VOTE_HEALTHY=false
-                  for i in {1..5}; do
-                    if curl -f http://localhost:8080 2>/dev/null; then
-                      echo "✅ Vote service is healthy"
-                      VOTE_HEALTHY=true
-                      break
-                    fi
-                    echo "Retry $i/5..."
-                    sleep 2
-                  done
-                  if [ "$VOTE_HEALTHY" != "true" ]; then
-                    echo "❌ Vote service not responding"
-                    cat /tmp/vote-pf.log || true
-                    exit 1
-                  fi
-
-                  # Test 2: Result service responds
-                  echo "Test 2: Result service health check..."
-                  RESULT_HEALTHY=false
-                  for i in {1..5}; do
-                    if curl -f http://localhost:8081 2>/dev/null; then
-                      echo "✅ Result service is healthy"
-                      RESULT_HEALTHY=true
-                      break
-                    fi
-                    echo "Retry $i/5..."
-                    sleep 2
-                  done
-                  if [ "$RESULT_HEALTHY" != "true" ]; then
-                    echo "❌ Result service not responding"
-                    cat /tmp/result-pf.log || true
-                    exit 1
-                  fi
-
-                  # Test 3: Vote service content
-                  echo "Test 3: Vote service shows voting options..."
-                  curl -s http://localhost:8080 | grep -i "Cats" || (echo "❌ Vote content not found" && exit 1)
-                  echo "✅ Vote content is correct"
-
-                  # Test 4: Result service content
-                  echo "Test 4: Result service shows results..."
-                  RESULT_OK=false
-                  for i in {1..5}; do
-                    RESULT_HEADERS_FILE=$(mktemp /tmp/result-headers-XXXX)
-                    RESULT_HTML_FILE=$(mktemp /tmp/result-html-XXXX)
-                    if ! curl -sS -D "$RESULT_HEADERS_FILE" http://localhost:8081 -o "$RESULT_HTML_FILE"; then
-                      echo "Attempt $i: download failed"
-                      sleep 3
-                      continue
-                    fi
-                    BYTES=$(wc -c < "$RESULT_HTML_FILE" || echo 0)
-                    echo "Attempt $i: downloaded $BYTES bytes"
-                    echo "Result response headers (attempt $i):"
-                    sed -n '1,25p' "$RESULT_HEADERS_FILE"
-                    echo "Result HTML preview (attempt $i):"
-                    sed -n '1,40p' "$RESULT_HTML_FILE"
-                    if grep -qiE "(Cats vs Dogs -- Result|ng-app=\"catsvsdogs\"|ng-controller=\"statsCtrl\"|No votes yet)" "$RESULT_HTML_FILE"; then
-                      echo "✅ Result content detected on attempt $i"
-                      RESULT_OK=true
-                      break
-                    else
-                      echo "Attempt $i: markers not found, retrying..."
-                      sleep 3
-                    fi
-                  done
-                  if [ "$RESULT_OK" != "true" ]; then
-                    echo "❌ Result content not found after retries"
-                    cat /tmp/result-pf.log || true
-                    exit 1
-                  fi
-
-                  # Test 5: Submit a vote
-                  echo "Test 5: Submit a vote..."
-                  VOTE_RESPONSE=$(curl -s -X POST http://localhost:8080 -d "vote=a")
-                  echo "Vote submitted successfully"
-
-                  # Test 6: Check worker is running
-                  echo "Test 6: Verify worker is processing..."
-                  kubectl get pods -n voting-app -l app=worker | grep -i "Running" || (echo "❌ Worker not running" && exit 1)
-                  echo "✅ Worker is running"
-
-                  # Test 7: Check database connectivity
-                  echo "Test 7: Verify database connectivity..."
-                  kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT version();" > /dev/null || (echo "❌ Database not accessible" && exit 1)
-                  echo "✅ Database is accessible"
-
-                  # Cleanup port-forwards
-                  kill $VOTE_PF_PID $RESULT_PF_PID 2>/dev/null || true
-
-                  echo "✅ All integration tests passed!"            # Show logs on failure
-            - name: Show logs on failure
-              if: failure()
-              run: |
-                  echo "========== Cluster Info =========="
-                  kubectl cluster-info
-
-                  echo "========== All Pods =========="
-                  kubectl get pods -n voting-app
-
-                  echo "========== Vote Logs =========="
-                  kubectl logs -n voting-app -l app=vote --tail=100 || true
-
-                  echo "========== Result Logs =========="
-                  kubectl logs -n voting-app -l app=result --tail=100 || true
-
-                  echo "========== Worker Logs =========="
-                  kubectl logs -n voting-app -l app=worker --tail=100 || true
-
-                  echo "========== PostgreSQL Logs =========="
-                  kubectl logs -n voting-app postgresql-0 --tail=100 || true
-
-                  echo "========== Redis Logs =========="
-                  kubectl logs -n voting-app redis-master-0 --tail=100 || true
-
-                  echo "========== Events =========="
-                  kubectl get events -n voting-app --sort-by='.lastTimestamp'
-
-            # Cleanup
-            - name: Cleanup Minikube
-              if: always()
-              run: |
-                  minikube delete || true
-
-    terraform-automation:
-        name: Terraform IaC Automation
-        runs-on: ubuntu-latest
-        needs: build-images
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Set up Terraform
-              uses: hashicorp/setup-terraform@v3
-              with:
-                  terraform_version: 1.7.5
-
-            - name: Terraform fmt check
-              working-directory: terraform
-              run: terraform fmt -check -recursive
-
-            - name: Terraform init
-              working-directory: terraform
-              run: terraform init -input=false
-
-            - name: Terraform validate
-              working-directory: terraform
-              run: terraform validate
-
-            - name: Terraform plan (dev)
-              working-directory: terraform
-              run: terraform plan -input=false -lock=false -out=plan.tfplan
-
-    # Job 3: Pipeline Summary
-    pipeline-summary:
-        name: Pipeline Summary
-        runs-on: ubuntu-latest
-        needs: [build-images, minikube-integration-test, terraform-automation]
+  # Job 1: Build Images
+  build-images:
+    name: Build & Scan Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+
+    strategy:
+      matrix:
+        service: [vote, result, worker]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "repository=$(echo '${{ github.repository }}' | tr [:upper:] [:lower:])" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}
+          tags: |
+            type=sha,prefix=,format=long
+            type=ref,event=branch
+            type=ref,event=pr
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          push: false
+          load: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+      - name: Run Trivy security scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
+          format: "sarif"
+          output: "trivy-${{ matrix.service }}-results.sarif"
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
         if: always()
+        with:
+          sarif_file: "trivy-${{ matrix.service }}-results.sarif"
+          category: "${{ matrix.service }}-image"
 
-        steps:
-            - name: Generate Summary
-              run: |
-                  echo "## 📊 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-                  echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
+      - name: Push ${{ matrix.service }} image
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:latest
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
 
-                  if [ "${{ needs.build-images.result }}" == "success" ]; then
-                    echo "### ✅ Build Phase: Success" >> $GITHUB_STEP_SUMMARY
-                    echo "- All images built and pushed to GHCR" >> $GITHUB_STEP_SUMMARY
-                    echo "- Security scans completed" >> $GITHUB_STEP_SUMMARY
-                  else
-                    echo "### ❌ Build Phase: Failed" >> $GITHUB_STEP_SUMMARY
-                  fi
+      - name: Save ${{ matrix.service }} image for Minikube
+        run: |
+          docker save ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/${{ matrix.service }}:${{ github.sha }} -o ${{ matrix.service }}-image.tar
 
-                  echo "" >> $GITHUB_STEP_SUMMARY
+      - name: Upload ${{ matrix.service }} image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+          path: ${{ matrix.service }}-image.tar
+          retention-days: 1
 
-                  if [ "${{ needs.minikube-integration-test.result }}" == "success" ]; then
-                    echo "### ✅ Integration Tests: Success" >> $GITHUB_STEP_SUMMARY
-                    echo "- Minikube cluster created" >> $GITHUB_STEP_SUMMARY
-                    echo "- Full stack deployed successfully" >> $GITHUB_STEP_SUMMARY
-                    echo "- All integration tests passed" >> $GITHUB_STEP_SUMMARY
-                  elif [ "${{ needs.minikube-integration-test.result }}" == "skipped" ]; then
-                    echo "### ⏭️ Integration Tests: Skipped" >> $GITHUB_STEP_SUMMARY
-                  else
-                    echo "### ❌ Integration Tests: Failed" >> $GITHUB_STEP_SUMMARY
-                  fi
+  # Job 2: Deploy and Test in Minikube
+  minikube-integration-test:
+    name: Minikube Integration Tests
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: ${{ !inputs.skip_minikube_tests }}
 
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  if [ "${{ needs.terraform-automation.result }}" == "success" ]; then
-                    echo "### ✅ IaC Automation: Success" >> $GITHUB_STEP_SUMMARY
-                    echo "- Terraform fmt/validate/plan completed" >> $GITHUB_STEP_SUMMARY
-                  else
-                    echo "### ❌ IaC Automation: Failed" >> $GITHUB_STEP_SUMMARY
-                  fi
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "### 📦 Available Images" >> $GITHUB_STEP_SUMMARY
-                  echo "- \`ghcr.io/${{ github.repository }}/vote:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-                  echo "- \`ghcr.io/${{ github.repository }}/result:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
-                  echo "- \`ghcr.io/${{ github.repository }}/worker:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+      - name: Set lowercase repository name
+        id: repo
+        run: echo "repository=$(echo '${{ github.repository }}' | tr [:upper:] [:lower:])" >> $GITHUB_OUTPUT
+
+      # Install Minikube
+      - name: Install Minikube
+        run: |
+          curl -LO https://storage.googleapis.com/minikube/releases/${{ env.MINIKUBE_VERSION }}/minikube-linux-amd64
+          sudo install minikube-linux-amd64 /usr/local/bin/minikube
+          minikube version
+
+      # Install kubectl
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/${{ env.KUBERNETES_VERSION }}/bin/linux/amd64/kubectl"
+          sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      # Install Helm
+      - name: Install Helm
+        run: |
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          helm version
+
+      # Start Minikube
+      - name: Start Minikube
+        run: |
+          minikube start \
+            --driver=docker \
+            --kubernetes-version=${{ env.KUBERNETES_VERSION }} \
+            --cpus=2 \
+            --memory=4096 \
+            --addons=ingress,metrics-server \
+            --wait=all
+
+          minikube status
+          kubectl cluster-info
+          kubectl get nodes
+
+      # Set KUBECONFIG for all subsequent steps
+      - name: Configure KUBECONFIG
+        run: |
+          # Update kubeconfig context to use minikube
+          kubectl config use-context minikube
+
+          # Verify connection
+          kubectl get nodes
+          kubectl get namespaces
+
+          echo "✅ KUBECONFIG configured successfully"            # Download built images
+      - name: Download vote image
+        uses: actions/download-artifact@v4
+        with:
+          name: vote-image
+
+      - name: Download result image
+        uses: actions/download-artifact@v4
+        with:
+          name: result-image
+
+      - name: Download worker image
+        uses: actions/download-artifact@v4
+        with:
+          name: worker-image
+
+      # Load images into Minikube
+      - name: Load images into Minikube
+        run: |
+          minikube image load vote-image.tar
+          minikube image load result-image.tar
+          minikube image load worker-image.tar
+
+          # Verify images
+          minikube image ls | grep -E 'vote|result|worker'
+
+      # Create namespace
+      - name: Create voting-app namespace
+        run: |
+          kubectl create namespace voting-app
+          kubectl label namespace voting-app \
+            pod-security.kubernetes.io/enforce=baseline \
+            pod-security.kubernetes.io/audit=baseline \
+            pod-security.kubernetes.io/warn=baseline
+
+      # Deploy PostgreSQL
+      - name: Deploy PostgreSQL with Helm
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+
+          helm upgrade --install postgresql bitnami/postgresql \
+            --namespace voting-app \
+            --values k8s/helm/postgresql-values-dev.yaml \
+            --wait \
+            --timeout 5m
+
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=postgresql \
+            -n voting-app \
+            --timeout=300s
+
+      # Deploy Redis
+      - name: Deploy Redis with Helm
+        run: |
+          helm upgrade --install redis bitnami/redis \
+            --namespace voting-app \
+            --values k8s/helm/redis-values-dev.yaml \
+            --wait \
+            --timeout 5m
+
+          kubectl wait --for=condition=ready pod \
+            -l app.kubernetes.io/name=redis \
+            -n voting-app \
+            --timeout=300s
+
+      # Deploy application manifests
+      - name: Deploy application manifests
+        run: |
+          # Update image tags in manifests to use built images
+          sed -i "s|image:.*vote:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/vote:${{ github.sha }}|g" k8s/manifests/05-vote.yaml
+          sed -i "s|image:.*result:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/result:${{ github.sha }}|g" k8s/manifests/06-result.yaml
+          sed -i "s|image:.*worker:.*|image: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repository }}/worker:${{ github.sha }}|g" k8s/manifests/07-worker.yaml
+
+          # Create secrets dynamically to avoid base64 patch issues
+          kubectl delete secret postgres-secret redis-secret --ignore-not-found=true -n voting-app
+          kubectl create secret generic postgres-secret \
+            --from-literal=postgres-user=postgres \
+            --from-literal=postgres-password=postgres \
+            --from-literal=postgres-db=postgres \
+            --dry-run=client -o yaml | kubectl apply -f - -n voting-app
+
+          kubectl create secret generic redis-secret \
+            --from-literal=redis-password="" \
+            --dry-run=client -o yaml | kubectl apply -f - -n voting-app
+
+          # Apply other manifests
+          kubectl apply -f k8s/manifests/02-configmap.yaml -n voting-app
+          kubectl apply -f k8s/manifests/05-vote.yaml -n voting-app
+          kubectl apply -f k8s/manifests/06-result.yaml -n voting-app
+          kubectl apply -f k8s/manifests/07-worker.yaml -n voting-app
+          kubectl apply -f k8s/manifests/08-network-policies.yaml -n voting-app || true
+          kubectl apply -f k8s/manifests/09-ingress.yaml -n voting-app
+
+      # Wait for all pods to be ready
+      - name: Wait for application pods
+        run: |
+          echo "Waiting for vote pods..."
+          kubectl wait --for=condition=ready pod \
+            -l app=vote \
+            -n voting-app \
+            --timeout=300s
+
+          echo "Waiting for result pods..."
+          kubectl wait --for=condition=ready pod \
+            -l app=result \
+            -n voting-app \
+            --timeout=300s
+
+          echo "Waiting for worker pods..."
+          kubectl wait --for=condition=ready pod \
+            -l app=worker \
+            -n voting-app \
+            --timeout=300s
+
+          # Show all pods
+          kubectl get pods -n voting-app
+
+      # Run integration tests
+      - name: Run integration tests
+        run: |
+          echo "🧪 Running Integration Tests..."
+
+          # Test using port-forward (runs in background)
+          echo "Setting up port-forwards..."
+          kubectl port-forward -n voting-app svc/vote 8080:80 > /tmp/vote-pf.log 2>&1 &
+          VOTE_PF_PID=$!
+          kubectl port-forward -n voting-app svc/result 8081:4000 > /tmp/result-pf.log 2>&1 &
+          RESULT_PF_PID=$!
+
+          # Wait for port-forwards to be ready and services to initialize
+          echo "Waiting for port-forwards and services to stabilize..."
+          echo "Result service needs time to connect to database..."
+          sleep 30                  # Test 1: Vote service responds
+          echo "Test 1: Vote service health check..."
+          VOTE_HEALTHY=false
+          for i in {1..5}; do
+            if curl -f http://localhost:8080 2>/dev/null; then
+              echo "✅ Vote service is healthy"
+              VOTE_HEALTHY=true
+              break
+            fi
+            echo "Retry $i/5..."
+            sleep 2
+          done
+          if [ "$VOTE_HEALTHY" != "true" ]; then
+            echo "❌ Vote service not responding"
+            cat /tmp/vote-pf.log || true
+            exit 1
+          fi
+
+          # Test 2: Result service responds
+          echo "Test 2: Result service health check..."
+          RESULT_HEALTHY=false
+          for i in {1..5}; do
+            if curl -f http://localhost:8081 2>/dev/null; then
+              echo "✅ Result service is healthy"
+              RESULT_HEALTHY=true
+              break
+            fi
+            echo "Retry $i/5..."
+            sleep 2
+          done
+          if [ "$RESULT_HEALTHY" != "true" ]; then
+            echo "❌ Result service not responding"
+            cat /tmp/result-pf.log || true
+            exit 1
+          fi
+
+          # Test 3: Vote service content
+          echo "Test 3: Vote service shows voting options..."
+          curl -s http://localhost:8080 | grep -i "Cats" || (echo "❌ Vote content not found" && exit 1)
+          echo "✅ Vote content is correct"
+
+          # Test 4: Result service content
+          echo "Test 4: Result service shows results..."
+          RESULT_OK=false
+          for i in {1..5}; do
+            RESULT_HEADERS_FILE=$(mktemp /tmp/result-headers-XXXX)
+            RESULT_HTML_FILE=$(mktemp /tmp/result-html-XXXX)
+            if ! curl -sS -D "$RESULT_HEADERS_FILE" http://localhost:8081 -o "$RESULT_HTML_FILE"; then
+              echo "Attempt $i: download failed"
+              sleep 3
+              continue
+            fi
+            BYTES=$(wc -c < "$RESULT_HTML_FILE" || echo 0)
+            echo "Attempt $i: downloaded $BYTES bytes"
+            echo "Result response headers (attempt $i):"
+            sed -n '1,25p' "$RESULT_HEADERS_FILE"
+            echo "Result HTML preview (attempt $i):"
+            sed -n '1,40p' "$RESULT_HTML_FILE"
+            if grep -qiE "(Cats vs Dogs -- Result|ng-app=\"catsvsdogs\"|ng-controller=\"statsCtrl\"|No votes yet)" "$RESULT_HTML_FILE"; then
+              echo "✅ Result content detected on attempt $i"
+              RESULT_OK=true
+              break
+            else
+              echo "Attempt $i: markers not found, retrying..."
+              sleep 3
+            fi
+          done
+          if [ "$RESULT_OK" != "true" ]; then
+            echo "❌ Result content not found after retries"
+            cat /tmp/result-pf.log || true
+            exit 1
+          fi
+
+          # Test 5: Submit a vote
+          echo "Test 5: Submit a vote..."
+          VOTE_RESPONSE=$(curl -s -X POST http://localhost:8080 -d "vote=a")
+          echo "Vote submitted successfully"
+
+          # Test 6: Check worker is running
+          echo "Test 6: Verify worker is processing..."
+          kubectl get pods -n voting-app -l app=worker | grep -i "Running" || (echo "❌ Worker not running" && exit 1)
+          echo "✅ Worker is running"
+
+          # Test 7: Check database connectivity
+          echo "Test 7: Verify database connectivity..."
+          kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT version();" > /dev/null || (echo "❌ Database not accessible" && exit 1)
+          echo "✅ Database is accessible"
+
+          # Cleanup port-forwards
+          kill $VOTE_PF_PID $RESULT_PF_PID 2>/dev/null || true
+
+          echo "✅ All integration tests passed!"            # Show logs on failure
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          echo "========== Cluster Info =========="
+          kubectl cluster-info
+
+          echo "========== All Pods =========="
+          kubectl get pods -n voting-app
+
+          echo "========== Vote Logs =========="
+          kubectl logs -n voting-app -l app=vote --tail=100 || true
+
+          echo "========== Result Logs =========="
+          kubectl logs -n voting-app -l app=result --tail=100 || true
+
+          echo "========== Worker Logs =========="
+          kubectl logs -n voting-app -l app=worker --tail=100 || true
+
+          echo "========== PostgreSQL Logs =========="
+          kubectl logs -n voting-app postgresql-0 --tail=100 || true
+
+          echo "========== Redis Logs =========="
+          kubectl logs -n voting-app redis-master-0 --tail=100 || true
+
+          echo "========== Events =========="
+          kubectl get events -n voting-app --sort-by='.lastTimestamp'
+
+      # Cleanup
+      - name: Cleanup Minikube
+        if: always()
+        run: |
+          minikube delete || true
+
+  terraform-automation:
+    name: Terraform IaC Automation
+    runs-on: ubuntu-latest
+    needs: build-images
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.7.5
+
+      - name: Terraform fmt check
+        working-directory: terraform
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        working-directory: terraform
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        working-directory: terraform
+        run: terraform validate
+
+      - name: Terraform plan (dev)
+        working-directory: terraform
+        run: terraform plan -input=false -lock=false -out=plan.tfplan
+
+  # Job 3: Pipeline Summary
+  pipeline-summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [build-images, minikube-integration-test, terraform-automation]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 📊 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.build-images.result }}" == "success" ]; then
+            echo "### ✅ Build Phase: Success" >> $GITHUB_STEP_SUMMARY
+            echo "- All images built and pushed to GHCR" >> $GITHUB_STEP_SUMMARY
+            echo "- Security scans completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Build Phase: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.minikube-integration-test.result }}" == "success" ]; then
+            echo "### ✅ Integration Tests: Success" >> $GITHUB_STEP_SUMMARY
+            echo "- Minikube cluster created" >> $GITHUB_STEP_SUMMARY
+            echo "- Full stack deployed successfully" >> $GITHUB_STEP_SUMMARY
+            echo "- All integration tests passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.minikube-integration-test.result }}" == "skipped" ]; then
+            echo "### ⏭️ Integration Tests: Skipped" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Integration Tests: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.terraform-automation.result }}" == "success" ]; then
+            echo "### ✅ IaC Automation: Success" >> $GITHUB_STEP_SUMMARY
+            echo "- Terraform fmt/validate/plan completed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ IaC Automation: Failed" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Available Images" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}/vote:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}/result:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`ghcr.io/${{ github.repository }}/worker:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
