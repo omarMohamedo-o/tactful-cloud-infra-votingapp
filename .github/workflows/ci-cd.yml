@@ -403,3 +403,13 @@ jobs:
           echo "3. Run smoke tests locally to verify the deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Note:** Automated deployment is not configured for local Minikube clusters." >> $GITHUB_STEP_SUMMARY
+
+      - name: Send notification on failure
+        if: |
+          needs.build-vote.result == 'failure' ||
+          needs.build-result.result == 'failure' ||
+          needs.build-worker.result == 'failure'
+        run: |
+          echo "❌ CI/CD Pipeline Failed!"
+          echo "::error::One or more build jobs failed"
+          exit 1

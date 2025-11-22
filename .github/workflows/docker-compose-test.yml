@@ -140,3 +140,10 @@ jobs:
           else
             echo "❌ Tests failed" >> $GITHUB_STEP_SUMMARY
           fi
+
+      - name: Send notification on failure
+        if: needs.test-docker-compose.result == 'failure'
+        run: |
+          echo "❌ Docker Compose Tests Failed!"
+          echo "::error::Docker Compose integration tests failed"
+          exit 1

@@ -517,3 +517,13 @@ jobs:
           echo "- \`ghcr.io/${{ github.repository }}/vote:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`ghcr.io/${{ github.repository }}/result:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`ghcr.io/${{ github.repository }}/worker:${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Send notification on failure
+        if: |
+          needs.build-images.result == 'failure' ||
+          needs.minikube-integration-test.result == 'failure' ||
+          needs.terraform-automation.result == 'failure'
+        run: |
+          echo "❌ CI/CD Pipeline Failed!"
+          echo "::error::One or more jobs failed in the CI/CD pipeline"
+          exit 1
