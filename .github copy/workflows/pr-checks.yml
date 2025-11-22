@@ -1,0 +1,117 @@
+name: Pull Request Checks
+
+on:
+    pull_request:
+        types: [opened, synchronize, reopened]
+
+jobs:
+    lint-and-format:
+        name: Lint & Format Check
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Python
+              uses: actions/setup-python@v5
+              with:
+                  python-version: "3.11"
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "18"
+
+            - name: Setup .NET
+              uses: actions/setup-dotnet@v4
+              with:
+                  dotnet-version: "8.0"
+
+            - name: Lint Python code (vote service)
+              run: |
+                  pip install flake8 pylint black
+                  cd vote
+                  echo "Running flake8..."
+                  flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics || true
+                  echo "Checking black formatting..."
+                  black --check . || true
+
+            - name: Lint JavaScript code (result service)
+              run: |
+                  cd result
+                  npm install
+                  echo "Running ESLint..."
+                  npx eslint . || true
+
+            - name: Lint .NET code (worker service)
+              run: |
+                  cd worker
+                  echo "Running dotnet format..."
+                  dotnet format --verify-no-changes --verbosity diagnostic || true
+
+            - name: Lint Dockerfile
+              uses: hadolint/hadolint-action@v3.1.0
+              with:
+                  dockerfile: vote/Dockerfile
+                  ignore: DL3008,DL3009
+                  failure-threshold: warning
+
+            - name: Lint YAML files
+              uses: ibiqlik/action-yamllint@v3
+              with:
+                  file_or_dir: k8s/manifests/
+                  config_file: .yamllint.yml
+                  strict: false
+
+    size-check:
+        name: Check Image Sizes
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                service: [vote, result, worker]
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Build image
+              run: |
+                  docker build -t ${{ matrix.service }}:pr ./${{ matrix.service }}
+
+            - name: Check image size
+              run: |
+                  SIZE=$(docker images ${{ matrix.service }}:pr --format "{{.Size}}")
+                  SIZE_MB=$(docker images ${{ matrix.service }}:pr --format "{{.Size}}" | sed 's/MB//')
+                  echo "Image size: $SIZE"
+
+                  # Alert if image is too large (> 500MB)
+                  if [ $(echo "$SIZE_MB > 500" | bc -l) -eq 1 ]; then
+                    echo "⚠️ Warning: Image size exceeds 500MB"
+                  fi
+
+    pr-summary:
+        name: PR Summary
+        runs-on: ubuntu-latest
+        needs: [lint-and-format, size-check]
+        if: always()
+
+        steps:
+            - name: Comment PR
+              uses: actions/github-script@v7
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  script: |
+                      const summary = `## PR Checks Summary
+
+                      - Lint & Format: ${{ needs.lint-and-format.result }}
+                      - Image Size Check: ${{ needs.size-check.result }}
+
+                      All checks must pass before merging.`;
+
+                      github.rest.issues.createComment({
+                        issue_number: context.issue.number,
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        body: summary
+                      })

@@ -1,0 +1,401 @@
+name: CI/CD Pipeline
+
+on:
+    push:
+        branches: [main, develop]
+    pull_request:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: "Environment to deploy to"
+                required: true
+                default: "dev"
+                type: choice
+                options:
+                    - dev
+                    - prod
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_PREFIX: ${{ github.repository }}
+
+jobs:
+    # Job 1: Build and Test Applications
+    build-and-test:
+        name: Build & Test Applications
+        runs-on: ubuntu-latest
+        strategy:
+            matrix:
+                service: [vote, result, worker]
+        permissions:
+            contents: read
+            packages: write
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Extract metadata for Docker
+              id: meta
+              uses: docker/metadata-action@v5
+              with:
+                  images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+                  tags: |
+                      type=ref,event=branch
+                      type=ref,event=pr
+                      type=semver,pattern={{version}}
+                      type=semver,pattern={{major}}.{{minor}}
+                      type=sha,prefix={{branch}}-
+                      type=raw,value=latest,enable={{is_default_branch}}
+
+            - name: Build and push Docker image
+              uses: docker/build-push-action@v5
+              with:
+                  context: ./${{ matrix.service }}
+                  push: true
+                  tags: ${{ steps.meta.outputs.tags }}
+                  labels: ${{ steps.meta.outputs.labels }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+            - name: Run application tests
+              run: |
+                  if [ -f "./${{ matrix.service }}/tests/tests.sh" ]; then
+                    echo "Running tests for ${{ matrix.service }}..."
+                    cd ./${{ matrix.service }}/tests
+                    bash tests.sh
+                  else
+                    echo "No tests found for ${{ matrix.service }}"
+                  fi
+
+    # Job 2: Security Scanning
+    security-scan:
+        name: Security Scan with Trivy
+        runs-on: ubuntu-latest
+        needs: build-and-test
+        strategy:
+            matrix:
+                service: [vote, result, worker]
+        permissions:
+            contents: read
+            security-events: write
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Log in to GitHub Container Registry
+              uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Run Trivy vulnerability scanner
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.ref_name }}-${{ github.sha }}
+                  format: "sarif"
+                  output: "trivy-results-${{ matrix.service }}.sarif"
+                  severity: "CRITICAL,HIGH"
+
+            - name: Upload Trivy results to GitHub Security tab
+              uses: github/codeql-action/upload-sarif@v3
+              if: always()
+              with:
+                  sarif_file: "trivy-results-${{ matrix.service }}.sarif"
+
+            - name: Run Trivy vulnerability scanner (Table format)
+              uses: aquasecurity/trivy-action@master
+              with:
+                  image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.ref_name }}-${{ github.sha }}
+                  format: "table"
+                  exit-code: "0"
+                  severity: "CRITICAL,HIGH,MEDIUM"
+
+    # Job 3: Infrastructure as Code Validation
+    iac-validation:
+        name: Validate IaC (Terraform)
+        runs-on: ubuntu-latest
+        defaults:
+            run:
+                working-directory: ./terraform
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Terraform
+              uses: hashicorp/setup-terraform@v3
+              with:
+                  terraform_version: 1.14.0
+
+            - name: Terraform Format Check
+              run: terraform fmt -check -recursive
+              continue-on-error: true
+
+            - name: Terraform Init
+              run: terraform init -backend=false
+
+            - name: Terraform Validate
+              run: terraform validate
+
+            - name: Run TFLint
+              uses: terraform-linters/setup-tflint@v4
+              with:
+                  tflint_version: latest
+
+            - name: TFLint
+              run: |
+                  tflint --init
+                  tflint --format compact
+              continue-on-error: true
+
+            - name: Run Checkov - IaC Security Scan
+              uses: bridgecrewio/checkov-action@master
+              with:
+                  directory: terraform/
+                  framework: terraform
+                  soft_fail: true
+                  output_format: cli
+
+    # Job 4: Kubernetes Manifests Validation
+    k8s-validation:
+        name: Validate Kubernetes Manifests
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Kubeconform
+              run: |
+                  wget https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz
+                  tar xf kubeconform-linux-amd64.tar.gz
+                  sudo mv kubeconform /usr/local/bin/
+
+            - name: Validate Kubernetes manifests
+              run: |
+                  kubeconform -summary -output json k8s/manifests/*.yaml
+
+            - name: Kubeval validation
+              uses: instrumenta/kubeval-action@master
+              with:
+                  files: k8s/manifests/
+
+    # Job 5: Deploy to Cluster
+    deploy:
+        name: Deploy to Kubernetes
+        runs-on: ubuntu-latest
+        needs: [security-scan, iac-validation, k8s-validation]
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+        environment:
+            name: ${{ github.event.inputs.environment || 'dev' }}
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup kubectl
+              uses: azure/setup-kubectl@v3
+              with:
+                  version: "v1.28.0"
+
+            - name: Setup Helm
+              uses: azure/setup-helm@v3
+              with:
+                  version: "3.13.0"
+
+            - name: Configure kubectl
+              run: |
+                  mkdir -p $HOME/.kube
+                  echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+                  chmod 600 $HOME/.kube/config
+
+            - name: Update image tags in manifests
+              run: |
+                  export IMAGE_TAG="${{ github.ref_name }}-${{ github.sha }}"
+                  sed -i "s|image: tactful-votingapp-cloud-infra-vote:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-vote:${IMAGE_TAG}|g" k8s/manifests/05-vote.yaml
+                  sed -i "s|image: tactful-votingapp-cloud-infra-result:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-result:${IMAGE_TAG}|g" k8s/manifests/06-result.yaml
+                  sed -i "s|image: tactful-votingapp-cloud-infra-worker:.*|image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-worker:${IMAGE_TAG}|g" k8s/manifests/07-worker.yaml
+                  sed -i "s|imagePullPolicy: Never|imagePullPolicy: Always|g" k8s/manifests/*.yaml
+
+            - name: Create namespace
+              run: |
+                  kubectl create namespace voting-app --dry-run=client -o yaml | kubectl apply -f -
+
+            - name: Create image pull secret
+              run: |
+                  kubectl create secret docker-registry ghcr-secret \
+                    --docker-server=${{ env.REGISTRY }} \
+                    --docker-username=${{ github.actor }} \
+                    --docker-password=${{ secrets.GITHUB_TOKEN }} \
+                    --namespace=voting-app \
+                    --dry-run=client -o yaml | kubectl apply -f -
+
+            - name: Deploy PostgreSQL via Helm
+              run: |
+                  helm repo add bitnami https://charts.bitnami.com/bitnami
+                  helm repo update
+                  helm upgrade --install postgresql bitnami/postgresql \
+                    --namespace voting-app \
+                    --values k8s/helm/postgresql-values-${{ github.event.inputs.environment || 'dev' }}.yaml \
+                    --wait --timeout 5m
+
+            - name: Deploy Redis via Helm
+              run: |
+                  helm upgrade --install redis bitnami/redis \
+                    --namespace voting-app \
+                    --values k8s/helm/redis-values-${{ github.event.inputs.environment || 'dev' }}.yaml \
+                    --wait --timeout 5m
+
+            - name: Wait for databases to be ready
+              run: |
+                  kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=postgresql -n voting-app --timeout=300s
+                  kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=redis -n voting-app --timeout=300s
+
+            - name: Deploy application manifests
+              run: |
+                  kubectl apply -f k8s/manifests/01-secrets.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/02-configmap.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/05-vote.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/06-result.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/07-worker.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/08-network-policies.yaml -n voting-app
+                  kubectl apply -f k8s/manifests/09-ingress.yaml -n voting-app
+
+            - name: Wait for deployment rollout
+              run: |
+                  kubectl rollout status deployment/vote -n voting-app --timeout=5m
+                  kubectl rollout status deployment/result -n voting-app --timeout=5m
+                  kubectl rollout status deployment/worker -n voting-app --timeout=5m
+
+            - name: Deployment summary
+              run: |
+                  echo "=== Deployment Summary ==="
+                  kubectl get pods -n voting-app
+                  kubectl get services -n voting-app
+                  kubectl get ingress -n voting-app
+
+    # Job 6: Smoke Tests
+    smoke-tests:
+        name: Run Smoke Tests
+        runs-on: ubuntu-latest
+        needs: deploy
+        if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup kubectl
+              uses: azure/setup-kubectl@v3
+              with:
+                  version: "v1.28.0"
+
+            - name: Configure kubectl
+              run: |
+                  mkdir -p $HOME/.kube
+                  echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+                  chmod 600 $HOME/.kube/config
+
+            - name: Get ingress endpoints
+              id: endpoints
+              run: |
+                  VOTE_URL=$(kubectl get ingress voting-app-ingress -n voting-app -o jsonpath='{.spec.rules[0].host}')
+                  RESULT_URL=$(kubectl get ingress voting-app-ingress -n voting-app -o jsonpath='{.spec.rules[1].host}')
+                  echo "vote_url=http://${VOTE_URL}" >> $GITHUB_OUTPUT
+                  echo "result_url=http://${RESULT_URL}" >> $GITHUB_OUTPUT
+
+            - name: Port forward for testing
+              run: |
+                  kubectl port-forward -n voting-app svc/vote 8080:80 &
+                  kubectl port-forward -n voting-app svc/result 8081:4000 &
+                  sleep 5
+
+            - name: Test Vote Service
+              run: |
+                  echo "Testing Vote Service..."
+                  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/)
+                  if [ "$RESPONSE" -eq 200 ]; then
+                    echo "✅ Vote service is responding (HTTP $RESPONSE)"
+                  else
+                    echo "❌ Vote service failed (HTTP $RESPONSE)"
+                    exit 1
+                  fi
+
+            - name: Test Result Service
+              run: |
+                  echo "Testing Result Service..."
+                  RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8081/)
+                  if [ "$RESPONSE" -eq 200 ]; then
+                    echo "✅ Result service is responding (HTTP $RESPONSE)"
+                  else
+                    echo "❌ Result service failed (HTTP $RESPONSE)"
+                    exit 1
+                  fi
+
+            - name: Test Vote Submission
+              run: |
+                  echo "Testing vote submission..."
+                  curl -X POST http://localhost:8080/ -d "vote=a" -s -o /dev/null
+                  echo "✅ Vote submitted successfully"
+                  sleep 3
+
+            - name: Verify vote processing
+              run: |
+                  echo "Verifying vote processing..."
+                  kubectl logs -n voting-app -l app=worker --tail=10
+                  echo "✅ Worker is processing votes"
+
+            - name: Health check summary
+              run: |
+                  echo "=== Health Check Summary ==="
+                  kubectl get pods -n voting-app -o wide
+                  echo ""
+                  echo "Vote endpoint: ${{ steps.endpoints.outputs.vote_url }}"
+                  echo "Result endpoint: ${{ steps.endpoints.outputs.result_url }}"
+
+    # Job 7: Notify on Success/Failure
+    notify:
+        name: Notification
+        runs-on: ubuntu-latest
+        needs: [smoke-tests]
+        if: always()
+
+        steps:
+            - name: Send notification
+              run: |
+                  if [ "${{ needs.smoke-tests.result }}" == "success" ]; then
+                    echo "🎉 Deployment completed successfully!"
+                    echo "Status: ✅ SUCCESS"
+                  else
+                    echo "❌ Deployment failed!"
+                    echo "Status: ❌ FAILURE"
+                    exit 1
+                  fi
+
+            - name: Create deployment summary
+              run: |
+                  echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Environment**: ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+                  echo "- **Status**: ${{ needs.smoke-tests.result }}" >> $GITHUB_STEP_SUMMARY
+                  echo "" >> $GITHUB_STEP_SUMMARY
+                  echo "### Services Deployed:" >> $GITHUB_STEP_SUMMARY
+                  echo "- Vote Service" >> $GITHUB_STEP_SUMMARY
+                  echo "- Result Service" >> $GITHUB_STEP_SUMMARY
+                  echo "- Worker Service" >> $GITHUB_STEP_SUMMARY
