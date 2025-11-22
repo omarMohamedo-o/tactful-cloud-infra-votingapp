@@ -397,12 +397,10 @@ jobs:
           kubectl get pods -n voting-app -l app=worker | grep -i "Running" || (echo "❌ Worker not running" && exit 1)
           echo "✅ Worker is running"
 
-          # Test 7: Check database connectivity
-          echo "Test 7: Verify database connectivity..."
-          kubectl exec -n voting-app postgresql-0 -- psql -U postgres -d postgres -c "SELECT version();" > /dev/null || (echo "❌ Database not accessible" && exit 1)
-          echo "✅ Database is accessible"
-
-          # Cleanup port-forwards
+                  # Test 7: Check database connectivity
+                  echo "Test 7: Verify database connectivity..."
+                  kubectl exec -n voting-app postgresql-0 -- env PGPASSWORD=postgres psql -U postgres -d postgres -c "SELECT 1;" > /dev/null || (echo "❌ Database not accessible" && exit 1)
+                  echo "✅ Database is accessible"          # Cleanup port-forwards
           kill $VOTE_PF_PID $RESULT_PF_PID 2>/dev/null || true
 
           echo "✅ All integration tests passed!"            # Show logs on failure
