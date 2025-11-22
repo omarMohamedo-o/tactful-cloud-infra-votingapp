@@ -8,7 +8,7 @@ data:
   OPTION_A: "Cats"
   OPTION_B: "Dogs"
   REDIS_HOST: "redis-master"
-  POSTGRES_HOST: "postgresql.voting-app.svc.cluster.local"
+  POSTGRES_HOST: "postgresql"
   POSTGRES_DB: "postgres"
   VOTE_PORT: "80"
   RESULT_PORT: "4000"
