@@ -174,15 +174,14 @@ jobs:
             # Set KUBECONFIG for all subsequent steps
             - name: Configure KUBECONFIG
               run: |
-                  mkdir -p ~/.kube
-                  minikube kubectl -- config view --raw > ~/.kube/config
-                  echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
+                  # Update kubeconfig context to use minikube
+                  kubectl config use-context minikube
 
                   # Verify connection
                   kubectl get nodes
                   kubectl get namespaces
 
-            # Download built images
+                  echo "✅ KUBECONFIG configured successfully"            # Download built images
             - name: Download vote image
               uses: actions/download-artifact@v4
               with:
