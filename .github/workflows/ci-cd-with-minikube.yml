@@ -300,11 +300,10 @@ jobs:
                   kubectl port-forward -n voting-app svc/result 8081:80 > /tmp/result-pf.log 2>&1 &
                   RESULT_PF_PID=$!
 
-                  # Wait for port-forwards to be ready
-                  echo "Waiting for port-forwards to stabilize..."
-                  sleep 10
-
-                  # Test 1: Vote service responds
+                  # Wait for port-forwards to be ready and services to initialize
+                  echo "Waiting for port-forwards and services to stabilize..."
+                  echo "Result service needs time to connect to database..."
+                  sleep 30                  # Test 1: Vote service responds
                   echo "Test 1: Vote service health check..."
                   for i in {1..5}; do
                     if curl -f http://localhost:8080 2>/dev/null; then
