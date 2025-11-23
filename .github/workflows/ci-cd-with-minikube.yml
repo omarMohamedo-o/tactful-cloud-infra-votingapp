@@ -267,6 +267,9 @@ jobs:
             --from-literal=redis-password="" \
             --dry-run=client -o yaml | kubectl apply -f - -n voting-app
 
+          # Apply service accounts first
+          kubectl apply -f k8s/manifests/00-serviceaccounts.yaml -n voting-app
+
           # Apply other manifests
           kubectl apply -f k8s/manifests/02-configmap.yaml -n voting-app
           kubectl apply -f k8s/manifests/05-vote.yaml -n voting-app
