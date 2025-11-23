@@ -49,8 +49,9 @@ output "next_steps" {
     
     The voting application has been automatically deployed via Terraform.
     
-    ⚠️  IMPORTANT: Configure /etc/hosts first!
-       Run: ./terraform/configure-hosts.sh
+    ⚠️  IMPORTANT: Configure /etc/hosts (one-time setup)
+       Run: ./configure-hosts.sh
+       
        Or manually add to /etc/hosts:
          $(minikube ip -p ${var.cluster_name}-${var.environment}) vote.local
          $(minikube ip -p ${var.cluster_name}-${var.environment}) result.local

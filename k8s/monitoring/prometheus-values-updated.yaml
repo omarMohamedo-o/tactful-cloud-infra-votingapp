@@ -1,0 +1,95 @@
+alertmanager:
+  alertmanagerSpec:
+    resources:
+      limits:
+        cpu: 100m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 128Mi
+    retention: 120h
+  enabled: true
+
+grafana:
+  adminPassword: admin
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - disableDeletion: false
+          editable: true
+          folder: ""
+          name: default
+          options:
+            path: /var/lib/grafana/dashboards/default
+          orgId: 1
+          type: file
+  enabled: true
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    limits:
+      cpu: 200m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+kubeControllerManager:
+  enabled: false
+kubeEtcd:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeStateMetrics:
+  enabled: true
+nodeExporter:
+  enabled: true
+
+# Prometheus Operator Configuration
+prometheusOperator:
+  # Enable watching resources in all namespaces
+  namespaces:
+    releaseNamespace: true
+    additional:
+      - voting-app
+
+prometheus:
+  prometheusSpec:
+    # Allow ServiceMonitors from all namespaces
+    serviceMonitorNamespaceSelector: {}
+    serviceMonitorSelector:
+      matchLabels:
+        release: prometheus
+
+    # Allow PodMonitors from all namespaces
+    podMonitorNamespaceSelector: {}
+    podMonitorSelector:
+      matchLabels:
+        release: prometheus
+
+    # Allow PrometheusRules from all namespaces
+    ruleNamespaceSelector: {}
+    ruleSelector:
+      matchLabels:
+        release: prometheus
+
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+    retention: 7d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi

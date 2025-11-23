@@ -1,0 +1,65 @@
+---
+# PodDisruptionBudget for Vote service
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vote-pdb
+  namespace: voting-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vote
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for Result service
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: result-pdb
+  namespace: voting-app
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: result
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for Worker service
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: worker-pdb
+  namespace: voting-app
+spec:
+  maxUnavailable: 50%
+  selector:
+    matchLabels:
+      app: worker
+  unhealthyPodEvictionPolicy: AlwaysAllow
+---
+# PodDisruptionBudget for PostgreSQL
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: postgres-pdb
+  namespace: voting-app
+spec:
+  maxUnavailable: 0 # StatefulSet - never allow disruption
+  selector:
+    matchLabels:
+      app: postgres
+  unhealthyPodEvictionPolicy: IfHealthyBudget
+---
+# PodDisruptionBudget for Redis
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: voting-app
+spec:
+  maxUnavailable: 0 # StatefulSet - never allow disruption
+  selector:
+    matchLabels:
+      app: redis
+  unhealthyPodEvictionPolicy: IfHealthyBudget

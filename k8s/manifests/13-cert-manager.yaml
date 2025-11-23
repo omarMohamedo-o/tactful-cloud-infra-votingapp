@@ -1,0 +1,74 @@
+---
+# Self-signed ClusterIssuer for local development
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# CA Issuer for generating certificates
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: voting-app-ca
+  namespace: voting-app
+spec:
+  isCA: true
+  commonName: voting-app-ca
+  secretName: voting-app-ca-secret
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+# CA Issuer using the generated CA certificate
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: voting-app-ca-issuer
+  namespace: voting-app
+spec:
+  ca:
+    secretName: voting-app-ca-secret
+---
+# Certificate for vote.local
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: vote-tls
+  namespace: voting-app
+spec:
+  secretName: vote-tls-secret
+  issuerRef:
+    name: voting-app-ca-issuer
+    kind: Issuer
+  dnsNames:
+    - vote.local
+    - www.vote.local
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048
+---
+# Certificate for result.local
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: result-tls
+  namespace: voting-app
+spec:
+  secretName: result-tls-secret
+  issuerRef:
+    name: voting-app-ca-issuer
+    kind: Issuer
+  dnsNames:
+    - result.local
+    - www.result.local
+  privateKey:
+    algorithm: RSA
+    encoding: PKCS1
+    size: 2048

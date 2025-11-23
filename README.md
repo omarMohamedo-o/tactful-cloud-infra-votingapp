@@ -5,21 +5,21 @@
 
 ---
 
-## 🚀 Quick Start (2 Commands!)
+## 🚀 Quick Start (3 Commands!)
 
 ```bash
-# 1. One-time setup for passwordless deployment
-sudo ./setup-sudoers.sh
-
-# 2. Deploy everything with Terraform
+# 1. Deploy everything with Terraform
 cd terraform && terraform init && terraform apply -auto-approve
+
+# 2. Configure /etc/hosts (sudo password once)
+cd .. && ./configure-hosts.sh
 
 # 3. Access applications
 curl http://vote.local      # Vote: Cats vs Dogs
 curl http://result.local    # Real-time results
 ```
 
-**✨ Fully automated! No password prompts!**
+**✨ Simple, secure, and automated!**
 
 ---
 
@@ -70,7 +70,7 @@ A **distributed microservices voting application** demonstrating modern cloud-na
 
 ## 📁 Project Structure
 
-```
+```bash
 tactful-votingapp-cloud-infra/
 ├── vote/                          # Python Flask voting service
 │   ├── app.py                     # Main application logic
@@ -571,7 +571,7 @@ Each phase builds on the previous one, creating a complete DevOps pipeline.
 
 ### Data Flow
 
-```
+```bash
 User → Vote Service → Redis Queue → Worker → PostgreSQL → Result Service → User
 ```
 
@@ -788,4 +788,4 @@ kubectl get pvc -n voting-app
 
 ---
 
-**Made with ❤️ - Cloud-Native DevOps Project**
+## Made with ❤️ - Cloud-Native DevOps Project

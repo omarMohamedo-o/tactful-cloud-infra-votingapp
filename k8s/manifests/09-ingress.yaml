@@ -5,6 +5,8 @@ metadata:
   name: voting-app-ingress
   namespace: voting-app
   annotations:
+    # HTTP-only for simple testing (no cert-manager required)
+    # For HTTPS: enable ssl-redirect and apply 13-cert-manager.yaml
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/websocket-services: "result"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"

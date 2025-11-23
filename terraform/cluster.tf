@@ -118,11 +118,10 @@ resource "null_resource" "create_namespace" {
   }
 }
 
-# Configure /etc/hosts for ingress (local development)
-# IMPORTANT: For passwordless operation, run this ONCE before terraform apply:
-#   sudo ./setup-sudoers.sh
-# This configures passwordless sudo for /etc/hosts modifications
-resource "null_resource" "configure_hosts" {
+# Display connection info (no /etc/hosts modification during terraform)
+# BEST PRACTICE: Configure /etc/hosts manually AFTER deployment
+# Run: ./configure-hosts.sh
+resource "null_resource" "display_connection_info" {
   depends_on = [null_resource.minikube_cluster]
 
   provisioner "local-exec" {
@@ -131,40 +130,24 @@ resource "null_resource" "configure_hosts" {
       
       echo ""
       echo "=========================================="
-      echo "🌐 Configuring /etc/hosts for Ingress"
+      echo "🌐 Minikube Ingress Configuration"
       echo "=========================================="
       echo ""
       echo "Minikube IP: $MINIKUBE_IP"
       echo ""
-      
-      # Try to configure /etc/hosts automatically (requires passwordless sudo)
-      # Remove old entries
-      if sudo -n sed -i.bak '/vote\.local/d' /etc/hosts 2>/dev/null && \
-         sudo -n sed -i.bak '/result\.local/d' /etc/hosts 2>/dev/null; then
-          
-          # Add new entries
-          echo "$MINIKUBE_IP vote.local" | sudo -n tee -a /etc/hosts > /dev/null
-          echo "$MINIKUBE_IP result.local" | sudo -n tee -a /etc/hosts > /dev/null
-          
-          echo "✅ /etc/hosts configured successfully!"
-          echo ""
-          echo "   vote.local   -> $MINIKUBE_IP"
-          echo "   result.local -> $MINIKUBE_IP"
-          echo ""
-      else
-          # Passwordless sudo not configured
-          echo "⚠️  Passwordless sudo not configured!"
-          echo ""
-          echo "To enable automatic /etc/hosts configuration:"
-          echo "  1. Run once: sudo ../setup-sudoers.sh"
-          echo "  2. Re-run: terraform apply"
-          echo ""
-          echo "Or configure manually:"
-          echo "  sudo bash -c \"sed -i.bak '/vote\.local/d; /result\.local/d' /etc/hosts\""
-          echo "  sudo bash -c \"echo '$MINIKUBE_IP vote.local' >> /etc/hosts\""
-          echo "  sudo bash -c \"echo '$MINIKUBE_IP result.local' >> /etc/hosts\""
-          echo ""
-      fi
+      echo "⚠️  /etc/hosts configuration required!"
+      echo ""
+      echo "After deployment completes, run:"
+      echo "  ./configure-hosts.sh"
+      echo ""
+      echo "Or manually add to /etc/hosts:"
+      echo "  $MINIKUBE_IP vote.local"
+      echo "  $MINIKUBE_IP result.local"
+      echo ""
+      echo "Then access:"
+      echo "  Vote:   http://vote.local"
+      echo "  Result: http://result.local"
+      echo ""
       
       echo "=========================================="
     EOT
@@ -253,6 +236,7 @@ resource "null_resource" "deploy_application" {
     command = <<-EOT
       kubectl apply -f ${path.module}/../k8s/manifests/01-secrets.yaml -n ${var.namespace}
       kubectl apply -f ${path.module}/../k8s/manifests/02-configmap.yaml -n ${var.namespace}
+      kubectl apply -f ${path.module}/../k8s/manifests/10-rbac.yaml -n ${var.namespace}
       kubectl apply -f ${path.module}/../k8s/manifests/05-vote.yaml -n ${var.namespace}
       kubectl apply -f ${path.module}/../k8s/manifests/06-result.yaml -n ${var.namespace}
       kubectl apply -f ${path.module}/../k8s/manifests/07-worker.yaml -n ${var.namespace}

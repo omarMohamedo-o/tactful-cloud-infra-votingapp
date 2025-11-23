@@ -1,0 +1,114 @@
+---
+# ServiceAccount for Vote service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vote-sa
+  namespace: voting-app
+  labels:
+    app: vote
+---
+# ServiceAccount for Result service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: result-sa
+  namespace: voting-app
+  labels:
+    app: result
+---
+# ServiceAccount for Worker service
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: worker-sa
+  namespace: voting-app
+  labels:
+    app: worker
+---
+# ServiceAccount for PostgreSQL
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: postgres-sa
+  namespace: voting-app
+  labels:
+    app: postgres
+---
+# ServiceAccount for Redis
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: redis-sa
+  namespace: voting-app
+  labels:
+    app: redis
+---
+# Role for Vote service (minimal permissions - no K8s API access needed)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vote-role
+  namespace: voting-app
+rules: [] # Vote service doesn't need K8s API access
+---
+# Role for Result service (minimal permissions - no K8s API access needed)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: result-role
+  namespace: voting-app
+rules: [] # Result service doesn't need K8s API access
+---
+# Role for Worker service (minimal permissions - no K8s API access needed)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: worker-role
+  namespace: voting-app
+rules: [] # Worker service doesn't need K8s API access
+---
+# RoleBinding for Vote service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vote-rolebinding
+  namespace: voting-app
+subjects:
+  - kind: ServiceAccount
+    name: vote-sa
+    namespace: voting-app
+roleRef:
+  kind: Role
+  name: vote-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# RoleBinding for Result service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: result-rolebinding
+  namespace: voting-app
+subjects:
+  - kind: ServiceAccount
+    name: result-sa
+    namespace: voting-app
+roleRef:
+  kind: Role
+  name: result-role
+  apiGroup: rbac.authorization.k8s.io
+---
+# RoleBinding for Worker service
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: worker-rolebinding
+  namespace: voting-app
+subjects:
+  - kind: ServiceAccount
+    name: worker-sa
+    namespace: voting-app
+roleRef:
+  kind: Role
+  name: worker-role
+  apiGroup: rbac.authorization.k8s.io

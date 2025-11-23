@@ -23,6 +23,11 @@ metadata:
   namespace: voting-app
 spec:
   replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0 # Ensure zero downtime
   selector:
     matchLabels:
       app: vote
@@ -31,12 +36,29 @@ spec:
       labels:
         app: vote
     spec:
+      serviceAccountName: vote-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: vote
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: vote
+                topologyKey: kubernetes.io/hostname
       containers:
         - name: vote
           image: tactful-votingapp-cloud-infra-vote:latest

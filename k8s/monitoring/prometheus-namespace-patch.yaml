@@ -1,0 +1,25 @@
+---
+# Patch to allow Prometheus to discover ServiceMonitors in all namespaces
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus-kube-prometheus-prometheus
+  namespace: monitoring
+spec:
+  # Allow ServiceMonitors from any namespace
+  serviceMonitorNamespaceSelector: {}
+  serviceMonitorSelector:
+    matchLabels:
+      release: prometheus
+
+  # Allow PodMonitors from any namespace
+  podMonitorNamespaceSelector: {}
+  podMonitorSelector:
+    matchLabels:
+      release: prometheus
+
+  # Allow PrometheusRules from any namespace
+  ruleNamespaceSelector: {}
+  ruleSelector:
+    matchLabels:
+      release: prometheus

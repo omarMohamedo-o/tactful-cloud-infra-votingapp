@@ -1,0 +1,27 @@
+checks:
+  addAllBuiltIn: true
+  exclude:
+    # Exclude checks that don't apply to our use case
+    - "no-read-only-root-fs" # Some apps need writable filesystem
+    - "unset-cpu-requirements" # We set CPU limits
+    - "unset-memory-requirements" # We set memory limits
+  includeLabelSelectors:
+    app:
+      - vote
+      - result
+      - worker
+      - postgres
+      - redis
+
+customChecks:
+  - name: "required-label-app"
+    template: required-label
+    params:
+      key: "app"
+      message: "All resources must have an 'app' label"
+
+  - name: "required-security-context"
+    template: required-annotation
+    params:
+      key: "securityContext"
+      message: "All pods must define a security context"

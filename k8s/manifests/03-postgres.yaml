@@ -45,6 +45,7 @@ spec:
       labels:
         app: postgres
     spec:
+      serviceAccountName: postgres-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 999 # postgres user
