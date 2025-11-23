@@ -1,181 +1,182 @@
 name: Enhanced CI/CD with Linting & Validation
 
 on:
-    push:
-        branches: [main, develop]
-    pull_request:
-        branches: [main]
-    workflow_dispatch:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
-    # Job 1: Dockerfile Linting with Hadolint
-    hadolint:
-        name: Lint Dockerfiles
-        runs-on: ubuntu-latest
-        strategy:
-            matrix:
-                service: [vote, result, worker]
+  # Job 1: Dockerfile Linting with Hadolint
+  hadolint:
+    name: Lint Dockerfiles
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [vote, result, worker]
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Run Hadolint
-              uses: hadolint/hadolint-action@v3.1.0
-              with:
-                  dockerfile: ./${{ matrix.service }}/Dockerfile
-                  failure-threshold: warning
-                  format: sarif
-                  output-file: hadolint-${{ matrix.service }}.sarif
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ./${{ matrix.service }}/Dockerfile
+          failure-threshold: warning
+          format: sarif
+          output-file: hadolint-${{ matrix.service }}.sarif
 
-            - name: Upload Hadolint results
-              uses: github/codeql-action/upload-sarif@v4
-              if: always()
-              with:
-                  sarif_file: hadolint-${{ matrix.service }}.sarif
-                  category: hadolint-${{ matrix.service }}
-
-            - name: Run Hadolint (console output)
-              uses: hadolint/hadolint-action@v3.1.0
-              with:
-                  dockerfile: ./${{ matrix.service }}/Dockerfile
-                  failure-threshold: error
-
-    # Job 2: Kubernetes Manifests Linting
-    kubelinter:
-        name: Lint Kubernetes Manifests
-        runs-on: ubuntu-latest
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Install kube-linter
-              run: |
-                  wget https://github.com/stackrox/kube-linter/releases/download/v0.6.8/kube-linter-linux.tar.gz
-                  tar -xzf kube-linter-linux.tar.gz
-                  sudo mv kube-linter /usr/local/bin/
-
-            - name: Run kube-linter on manifests
-              run: |
-                  kube-linter lint k8s/manifests/ \
-                    --config .kube-linter.yaml \
-                    --format=sarif > kube-linter-results.sarif || true
-
-            - name: Upload kube-linter results
-              uses: github/codeql-action/upload-sarif@v4
-              if: always()
-              with:
-                  sarif_file: kube-linter-results.sarif
-                  category: kube-linter
-
-            - name: Run kube-linter (console output)
-              run: |
-                  kube-linter lint k8s/manifests/ --config .kube-linter.yaml
-
-    # Job 3: Terraform Validation
-    terraform-validate:
-        name: Validate Terraform
-        runs-on: ubuntu-latest
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Setup Terraform
-              uses: hashicorp/setup-terraform@v3
-              with:
-                  terraform_version: 1.6.0
-
-            - name: Terraform Format Check
-              run: |
-                  cd terraform
-                  terraform fmt -check -recursive
-
-            - name: Terraform Init
-              run: |
-                  cd terraform
-                  terraform init -backend=false
-
-            - name: Terraform Validate
-              run: |
-                  cd terraform
-                  terraform validate
-
-            - name: TFLint
-              uses: terraform-linters/setup-tflint@v4
-              with:
-                  tflint_version: latest
-
-            - name: Run TFLint
-              run: |
-                  cd terraform
-                  tflint --init
-                  tflint --format compact
-
-    # Job 4: YAML Validation
-    yaml-lint:
-        name: Lint YAML Files
-        runs-on: ubuntu-latest
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Install yamllint
-              run: pip install yamllint
-
-            - name: Run yamllint
-              run: |
-                  yamllint -c .yamllint.yaml \
-                    k8s/manifests/ \
-                    k8s/helm/ \
-                    .github/workflows/ \
-                    docker-compose.yml
-
-    # Job 5: Shell Script Linting
-    shellcheck:
-        name: Lint Shell Scripts
-        runs-on: ubuntu-latest
-
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4
-
-            - name: Run ShellCheck
-              uses: ludeeus/action-shellcheck@master
-              with:
-                  scandir: "./k8s"
-                  severity: warning
-                  format: gcc
-
-    # Job 6: Summary
-    lint-summary:
-        name: Linting Summary
-        runs-on: ubuntu-latest
-        needs: [hadolint, kubelinter, terraform-validate, yaml-lint, shellcheck]
+      - name: Upload Hadolint results
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
+        with:
+          sarif_file: hadolint-${{ matrix.service }}.sarif
+          category: hadolint-${{ matrix.service }}
 
-        steps:
-            - name: Generate Summary
-              run: |
-                  echo "## 🔍 Linting & Validation Summary" >> $GITHUB_STEP_SUMMARY
-                  echo "" >> $GITHUB_STEP_SUMMARY
-                  echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
-                  echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-                  echo "| Hadolint (Dockerfiles) | ${{ needs.hadolint.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "| kube-linter (K8s manifests) | ${{ needs.kubelinter.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "| Terraform Validation | ${{ needs.terraform-validate.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "| YAML Lint | ${{ needs.yaml-lint.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-                  echo "| ShellCheck | ${{ needs.shellcheck.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+      - name: Run Hadolint (console output)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ./${{ matrix.service }}/Dockerfile
+          failure-threshold: error
 
-            - name: Fail on any errors
-              if: |
-                  needs.hadolint.result == 'failure' ||
-                  needs.kubelinter.result == 'failure' ||
-                  needs.terraform-validate.result == 'failure' ||
-                  needs.yaml-lint.result == 'failure' ||
-                  needs.shellcheck.result == 'failure'
-              run: |
-                  echo "❌ One or more linting checks failed"
-                  exit 1
+  # Job 2: Kubernetes Manifests Linting
+  kubelinter:
+    name: Lint Kubernetes Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kube-linter
+        run: |
+          wget https://github.com/stackrox/kube-linter/releases/download/v0.6.8/kube-linter-linux.tar.gz
+          tar -xzf kube-linter-linux.tar.gz
+          sudo mv kube-linter /usr/local/bin/
+
+      - name: Run kube-linter on manifests
+        run: |
+          kube-linter lint k8s/manifests/ \
+            --config .kube-linter.yaml \
+            --format=sarif > kube-linter-results.sarif || true
+
+      - name: Upload kube-linter results
+        uses: github/codeql-action/upload-sarif@v4
+        if: always()
+        with:
+          sarif_file: kube-linter-results.sarif
+          category: kube-linter
+
+      - name: Run kube-linter (console output)
+        run: |
+          kube-linter lint k8s/manifests/ --config .kube-linter.yaml
+
+  # Job 3: Terraform Validation
+  terraform-validate:
+    name: Validate Terraform
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Terraform Format Check
+        run: |
+          cd terraform
+          terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init -backend=false
+
+      - name: Terraform Validate
+        run: |
+          cd terraform
+          terraform validate
+
+      - name: TFLint
+        uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: latest
+
+      - name: Run TFLint
+        run: |
+          cd terraform
+          tflint --init
+          tflint --format compact
+
+  # Job 4: YAML Validation
+  yaml-lint:
+    name: Lint YAML Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: Run yamllint
+        run: |
+          yamllint -c .yamllint.yaml \
+            k8s/manifests/ \
+            k8s/helm/ \
+            .github/workflows/ \
+            docker-compose.yml
+
+  # Job 5: Shell Script Linting
+  shellcheck:
+    name: Lint Shell Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: "."
+          ignore_paths: "node_modules result/node_modules"
+          severity: warning
+          format: gcc
+
+  # Job 6: Summary
+  lint-summary:
+    name: Linting Summary
+    runs-on: ubuntu-latest
+    needs: [hadolint, kubelinter, terraform-validate, yaml-lint, shellcheck]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🔍 Linting & Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Hadolint (Dockerfiles) | ${{ needs.hadolint.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| kube-linter (K8s manifests) | ${{ needs.kubelinter.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Terraform Validation | ${{ needs.terraform-validate.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| YAML Lint | ${{ needs.yaml-lint.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| ShellCheck | ${{ needs.shellcheck.result == 'success' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail on any errors
+        if: |
+          needs.hadolint.result == 'failure' ||
+          needs.kubelinter.result == 'failure' ||
+          needs.terraform-validate.result == 'failure' ||
+          needs.yaml-lint.result == 'failure' ||
+          needs.shellcheck.result == 'failure'
+        run: |
+          echo "❌ One or more linting checks failed"
+          exit 1
