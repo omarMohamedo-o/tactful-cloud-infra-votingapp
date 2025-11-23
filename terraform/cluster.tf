@@ -127,29 +127,10 @@ resource "null_resource" "display_connection_info" {
   provisioner "local-exec" {
     command = <<-EOT
       MINIKUBE_IP=$(minikube ip -p ${var.cluster_name}-${var.environment})
-      
       echo ""
-      echo "=========================================="
-      echo "🌐 Minikube Ingress Configuration"
-      echo "=========================================="
-      echo ""
-      echo "Minikube IP: $MINIKUBE_IP"
-      echo ""
-      echo "⚠️  /etc/hosts configuration required!"
-      echo ""
-      echo "After deployment completes, run:"
-      echo "  ./configure-hosts.sh"
-      echo ""
-      echo "Or manually add to /etc/hosts:"
-      echo "  $MINIKUBE_IP vote.local"
-      echo "  $MINIKUBE_IP result.local"
-      echo ""
-      echo "Then access:"
+      echo "Configure /etc/hosts: sudo ./configure-hosts.sh"
       echo "  Vote:   http://vote.local"
       echo "  Result: http://result.local"
-      echo ""
-      
-      echo "=========================================="
     EOT
   }
 }
