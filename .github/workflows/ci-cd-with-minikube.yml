@@ -279,22 +279,28 @@ jobs:
       - name: Wait for application pods
         run: |
           echo "Waiting for pods to be created..."
-          sleep 10
+          sleep 15
 
+          echo "Waiting for vote pods..."
           kubectl wait --for=condition=ready pod \
             -l app=vote \
             -n voting-app \
-            --timeout=300s || true
+            --timeout=300s
 
+          echo "Waiting for result pods..."
           kubectl wait --for=condition=ready pod \
             -l app=result \
             -n voting-app \
-            --timeout=300s || true
+            --timeout=300s
 
+          echo "Waiting for worker pods..."
           kubectl wait --for=condition=ready pod \
             -l app=worker \
             -n voting-app \
-            --timeout=300s || true
+            --timeout=300s
+
+          echo "All pods ready! Waiting 30s for services to fully initialize..."
+          sleep 30
 
           kubectl get pods -n voting-app
 
@@ -303,49 +309,48 @@ jobs:
         run: |
           echo "🧪 Running Integration Tests..."
 
-          # Test using port-forward (runs in background)
+          # Setup port-forwards
           echo "Setting up port-forwards..."
           kubectl port-forward -n voting-app svc/vote 8080:80 > /tmp/vote-pf.log 2>&1 &
           VOTE_PF_PID=$!
           kubectl port-forward -n voting-app svc/result 8081:4000 > /tmp/result-pf.log 2>&1 &
           RESULT_PF_PID=$!
 
-          # Wait for port-forwards to be ready and services to initialize
-          echo "Waiting for port-forwards and services to stabilize..."
-          echo "Result service needs time to connect to database..."
-          sleep 30                  # Test 1: Vote service responds
+          sleep 5
+
+          # Test 1: Vote service
           echo "Test 1: Vote service health check..."
           VOTE_HEALTHY=false
-          for i in {1..5}; do
-            if curl -f http://localhost:8080 2>/dev/null; then
+          for i in {1..10}; do
+            if curl -f http://localhost:8080 2>/dev/null | grep -q "Cats"; then
               echo "✅ Vote service is healthy"
               VOTE_HEALTHY=true
               break
             fi
-            echo "Retry $i/5..."
-            sleep 2
+            echo "Retry $i/10..."
+            sleep 3
           done
           if [ "$VOTE_HEALTHY" != "true" ]; then
             echo "❌ Vote service not responding"
-            cat /tmp/vote-pf.log || true
+            kubectl logs -n voting-app -l app=vote --tail=50 || true
             exit 1
           fi
 
-          # Test 2: Result service responds
+          # Test 2: Result service
           echo "Test 2: Result service health check..."
           RESULT_HEALTHY=false
-          for i in {1..5}; do
-            if curl -f http://localhost:8081 2>/dev/null; then
+          for i in {1..10}; do
+            if curl -f http://localhost:8081 2>/dev/null | grep -q "result"; then
               echo "✅ Result service is healthy"
               RESULT_HEALTHY=true
               break
             fi
-            echo "Retry $i/5..."
-            sleep 2
+            echo "Retry $i/10..."
+            sleep 3
           done
           if [ "$RESULT_HEALTHY" != "true" ]; then
             echo "❌ Result service not responding"
-            cat /tmp/result-pf.log || true
+            kubectl logs -n voting-app -l app=result --tail=50 || true
             exit 1
           fi
 
