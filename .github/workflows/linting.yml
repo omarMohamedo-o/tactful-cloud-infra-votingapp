@@ -147,8 +147,10 @@ jobs:
         with:
           scandir: "."
           ignore_paths: "node_modules result/node_modules"
-          severity: warning
+          severity: error
           format: gcc
+        env:
+          SHELLCHECK_OPTS: -e SC3040
 
   # Job 6: Summary
   lint-summary:

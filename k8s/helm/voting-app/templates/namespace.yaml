@@ -5,9 +5,9 @@ metadata:
   name: {{ .Values.namespace.name }}
   labels:
     {{- toYaml .Values.namespace.labels | nindent 4 }}
-    {{- if .Values.namespace.podSecurityStandards }}
+{{- if .Values.namespace.podSecurityStandards }}
     pod-security.kubernetes.io/enforce: {{ .Values.namespace.podSecurityStandards.enforce }}
     pod-security.kubernetes.io/audit: {{ .Values.namespace.podSecurityStandards.audit }}
     pod-security.kubernetes.io/warn: {{ .Values.namespace.podSecurityStandards.warn }}
-    {{- end }}
+{{- end }}
 {{- end }}

@@ -25,3 +25,5 @@ ignore: |
   __pycache__/
   *.pyc
   .terraform/
+  k8s/helm/**/templates/
+  result/node_modules/

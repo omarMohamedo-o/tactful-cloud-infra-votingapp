@@ -18,10 +18,8 @@ customChecks:
     template: required-label
     params:
       key: "app"
-      message: "All resources must have an 'app' label"
 
   - name: "required-security-context"
     template: required-annotation
     params:
       key: "securityContext"
-      message: "All pods must define a security context"
