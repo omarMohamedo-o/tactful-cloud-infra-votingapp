@@ -43,5 +43,17 @@ obj/
 *.user
 *.suo
 
+# Terraform
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/kubeconfig-*
+terraform/k8s-apps/.terraform/
+terraform/k8s-apps/.terraform.lock.hcl
+terraform/k8s-apps/terraform.tfstate
+terraform/k8s-apps/terraform.tfstate.backup
+terraform/k8s-apps/tfplan
+
 # Snyk Security Extension - AI Rules (auto-generated)
 .github/instructions/snyk_rules.instructions.md
