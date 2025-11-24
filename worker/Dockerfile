@@ -1,6 +1,6 @@
 # Multi-stage build for .NET Worker service
 # Stage 1: Build stage
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS builder
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS builder
 
 # Set working directory
 WORKDIR /source
