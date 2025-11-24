@@ -12,7 +12,7 @@
 cd terraform && terraform init && terraform apply -auto-approve
 
 # 2. Configure /etc/hosts (sudo password once)
-cd .. && ./configure-hosts.sh
+cd .. && chmod +x configure-hosts.sh && ./configure-hosts.sh
 
 # 3. Access applications
 curl http://vote.local      # Vote: Cats vs Dogs
