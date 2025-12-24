@@ -14,7 +14,7 @@ COPY . .
 RUN dotnet publish -c Release -o /app --no-restore
 
 # Stage 2: Runtime stage
-FROM mcr.microsoft.com/dotnet/runtime:8.0-alpine
+FROM mcr.microsoft.com/dotnet/runtime:10.0-alpine
 
 # Create non-root user
 RUN addgroup -S appuser && adduser -S appuser -G appuser
